@@ -12,7 +12,7 @@ dist/
 build/
 
 # 出力ファイル
-buzz_posts_*.csv
+output/
 
 # IDE
 .vscode/

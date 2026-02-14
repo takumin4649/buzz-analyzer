@@ -1,6 +1,5 @@
-"""TwitterAPI.ioを使ってAI系バズポストを取得しCSVに保存するスクリプト"""
+"""TwitterAPI.ioを使ってAI系バズポストを取得しExcelに保存するスクリプト"""
 
-import csv
 import os
 import sys
 import time
@@ -8,6 +7,9 @@ from datetime import datetime
 
 import requests
 from dotenv import load_dotenv
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill, Alignment
+from openpyxl.utils import get_column_letter
 
 # .envファイルから環境変数を読み込む
 load_dotenv()
@@ -97,6 +99,7 @@ def fetch_buzz_posts():
 
     print(f"\n重複排除後の合計取得件数: {len(all_tweets)}件")
 
+    # データ整形
     rows = []
     for tweet in all_tweets:
         user = tweet.get("author", {})
@@ -111,19 +114,77 @@ def fetch_buzz_posts():
             "リプライ数": tweet.get("replyCount", 0),
             "投稿日時": tweet.get("createdAt", ""),
             "ユーザー名": username,
-            "フォロワー数": user.get("followersCount", 0),
+            "フォロワー数": "未取得",
             "ポストURL": post_url,
         })
 
+    # いいね数で降順ソート
+    rows.sort(key=lambda x: x["いいね数"], reverse=True)
+
+    # outputフォルダを作成
+    output_dir = "output"
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Excelファイル作成
     today = datetime.now().strftime("%Y%m%d")
-    filename = f"buzz_posts_{today}.csv"
-    fieldnames = ["本文", "いいね数", "リポスト数", "リプライ数", "投稿日時", "ユーザー名", "フォロワー数", "ポストURL"]
+    filename = os.path.join(output_dir, f"buzz_posts_{today}.xlsx")
 
-    with open(filename, "w", newline="", encoding="utf-8-sig") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(rows)
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "バズポスト"
 
+    # ヘッダー
+    headers = ["本文", "いいね数", "リポスト数", "リプライ数", "投稿日時", "ユーザー名", "フォロワー数", "ポストURL"]
+    ws.append(headers)
+
+    # ヘッダー行のスタイル設定
+    header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+    header_font = Font(bold=True, color="FFFFFF")
+
+    for col_num, header in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col_num)
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+
+    # データ行を追加
+    for row_data in rows:
+        ws.append([
+            row_data["本文"],
+            row_data["いいね数"],
+            row_data["リポスト数"],
+            row_data["リプライ数"],
+            row_data["投稿日時"],
+            row_data["ユーザー名"],
+            row_data["フォロワー数"],
+            row_data["ポストURL"],
+        ])
+
+    # 本文列（A列）の折り返し設定
+    for row in range(2, len(rows) + 2):
+        cell = ws.cell(row=row, column=1)
+        cell.alignment = Alignment(wrap_text=True, vertical="top")
+
+    # 列幅の自動調整
+    column_widths = {
+        1: 60,  # 本文
+        2: 12,  # いいね数
+        3: 12,  # リポスト数
+        4: 12,  # リプライ数
+        5: 25,  # 投稿日時
+        6: 20,  # ユーザー名
+        7: 12,  # フォロワー数
+        8: 50,  # ポストURL
+    }
+
+    for col_num, width in column_widths.items():
+        ws.column_dimensions[get_column_letter(col_num)].width = width
+
+    # オートフィルター設定
+    ws.auto_filter.ref = f"A1:{get_column_letter(len(headers))}{len(rows) + 1}"
+
+    # 保存
+    wb.save(filename)
     print(f"保存完了: {filename}")
 
 
