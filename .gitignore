@@ -1,0 +1,22 @@
+# 環境変数ファイル（APIキーなど機密情報を含む）
+.env
+
+# Python関連
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# 出力ファイル
+buzz_posts_*.csv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
