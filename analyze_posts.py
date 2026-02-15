@@ -671,7 +671,31 @@ def generate_report(df, output_filename, original_count, excluded_count):
         f.write("3. **読みやすさ** - 改行・箇条書き・絵文字で視覚的に整理\n")
         f.write("4. **再現性** - 「自分にもできそう」と思わせる\n")
         f.write("5. **感情を刺激** - 期待・驚き・共感のいずれかを含める\n\n")
-        f.write("これらを組み合わせることで、フォロワーが少なくてもバズる可能性が高まります。\n")
+        f.write("これらを組み合わせることで、フォロワーが少なくてもバズる可能性が高まります。\n\n")
+
+        # セクション8: バズポスト自動生成
+        print("バズポストテンプレートを生成中...")
+        try:
+            from generate_posts import generate_posts, format_posts_markdown
+            posts, tools, works, ctas = generate_posts(df)
+            md = format_posts_markdown(posts, tools, works, ctas)
+            f.write(md)
+        except Exception as e:
+            print(f"  投稿テンプレート生成をスキップ: {e}")
+
+        # セクション9: グラフ可視化
+        print("グラフを生成中...")
+        try:
+            from visualize import generate_all_charts
+            chart_dir = os.path.join(os.path.dirname(output_filename), "charts")
+            chart_paths = generate_all_charts(df, chart_dir)
+            f.write("\n## 9. 可視化グラフ\n\n")
+            f.write("以下のグラフが生成されました：\n\n")
+            for name, path in chart_paths.items():
+                f.write(f"- **{name}**: `{path}`\n")
+            f.write("\n")
+        except Exception as e:
+            print(f"  グラフ生成をスキップ: {e}")
 
     print(f"\nレポート生成完了: {output_filename}")
 
