@@ -103,7 +103,7 @@ st.sidebar.markdown(f"**表示件数:** {len(df_filtered)} / {len(df)}件")
 st.title("📊 バズポスト分析ダッシュボード")
 
 # タブ
-tab1, tab2, tab3, tab4 = st.tabs(["📈 概要", "📋 投稿一覧", "🔍 詳細分析", "✍️ テンプレート生成"])
+tab1, tab2, tab3, tab4, tab5 = st.tabs(["📈 概要", "📋 投稿一覧", "🔍 詳細分析", "✍️ テンプレート生成", "🔬 高度な分析"])
 
 
 # ===== タブ1: 概要 =====
@@ -308,3 +308,162 @@ with tab4:
     4. 絵文字を2〜3個追加
     5. 朝7〜9時 or 夜19〜21時に投稿
     """)
+
+
+# ===== タブ5: 高度な分析 =====
+with tab5:
+    st.subheader("🔬 高度な分析")
+
+    advanced_type = st.selectbox(
+        "分析タイプを選択",
+        ["バズ予測スコア", "テキスト最適化", "ユーザー分析"],
+        key="advanced_analysis",
+    )
+
+    if advanced_type == "バズ予測スコア":
+        st.markdown("### 投稿テキストのバズ予測")
+        st.markdown("投稿テキストを入力すると、バズりやすさを0-100点で予測します。")
+
+        user_text = st.text_area("投稿テキストを入力してください", height=150, key="buzz_score_input")
+        if st.button("スコアを計算", type="primary", key="calc_score"):
+            if user_text.strip():
+                try:
+                    from analyze_posts import calculate_buzz_score
+                    result = calculate_buzz_score(user_text)
+                    score = result["total_score"]
+
+                    col1, col2 = st.columns([1, 2])
+                    with col1:
+                        st.metric("バズ予測スコア", f"{score}/100点")
+                        if score >= 70:
+                            st.success("バズる可能性が高い！")
+                        elif score >= 50:
+                            st.info("改善の余地あり")
+                        else:
+                            st.warning("要改善")
+
+                    with col2:
+                        st.markdown("#### 要素別スコア")
+                        factor_df = pd.DataFrame([
+                            {"要素": k, "スコア": v} for k, v in result["factors"].items()
+                        ])
+                        st.bar_chart(factor_df.set_index("要素")["スコア"])
+
+                except Exception as e:
+                    st.error(f"スコア計算に失敗: {e}")
+            else:
+                st.warning("テキストを入力してください")
+
+        # 全投稿のスコア分布
+        st.markdown("---")
+        st.markdown("### 全投稿のスコア分析")
+        try:
+            from analyze_posts import analyze_buzz_scores
+            buzz_data = analyze_buzz_scores(df_filtered)
+
+            st.markdown(f"**予測スコアと実いいね数の相関:** r={buzz_data['correlation']:.2f}")
+
+            score_df = pd.DataFrame([
+                {"スコア帯": k, "件数": len(v), "平均いいね": sum(v)/len(v) if v else 0}
+                for k, v in buzz_data["score_buckets"].items()
+            ])
+            st.dataframe(score_df, use_container_width=True)
+
+        except Exception as e:
+            st.error(f"分析に失敗: {e}")
+
+    elif advanced_type == "テキスト最適化":
+        try:
+            from analyze_posts import analyze_text_length, analyze_emoji_usage, analyze_hashtag_usage
+
+            st.markdown("### 文字数分析")
+            tl_data = analyze_text_length(df_filtered)
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("平均文字数", f"{tl_data['avg_length']:.0f}字")
+            with col2:
+                st.metric("最適文字数帯", tl_data["best_bucket"])
+            with col3:
+                st.metric("相関係数", f"r={tl_data['correlation']:.2f}")
+
+            bucket_df = pd.DataFrame([
+                {"文字数帯": k, "件数": len(v), "平均いいね": sum(v)/len(v) if v else 0}
+                for k, v in tl_data["bucket_data"].items()
+            ])
+            st.bar_chart(bucket_df.set_index("文字数帯")["平均いいね"])
+
+            st.markdown("---")
+            st.markdown("### 絵文字分析")
+            emoji_data = analyze_emoji_usage(df_filtered)
+            col1, col2 = st.columns(2)
+            with col1:
+                avg_with = sum(emoji_data["with_emoji"]) / len(emoji_data["with_emoji"]) if emoji_data["with_emoji"] else 0
+                st.metric("絵文字あり 平均いいね", f"{avg_with:.0f}")
+            with col2:
+                avg_without = sum(emoji_data["without_emoji"]) / len(emoji_data["without_emoji"]) if emoji_data["without_emoji"] else 0
+                st.metric("絵文字なし 平均いいね", f"{avg_without:.0f}")
+
+            emoji_count_df = pd.DataFrame([
+                {"絵文字数": k, "件数": len(v), "平均いいね": sum(v)/len(v) if v else 0}
+                for k, v in emoji_data["emoji_count_data"].items()
+            ])
+            st.dataframe(emoji_count_df, use_container_width=True)
+
+            st.markdown("---")
+            st.markdown("### ハッシュタグ分析")
+            ht_data = analyze_hashtag_usage(df_filtered)
+            col1, col2 = st.columns(2)
+            with col1:
+                avg_ht = sum(ht_data["with_hashtag"]) / len(ht_data["with_hashtag"]) if ht_data["with_hashtag"] else 0
+                st.metric("ハッシュタグあり 平均いいね", f"{avg_ht:.0f}")
+            with col2:
+                avg_no_ht = sum(ht_data["without_hashtag"]) / len(ht_data["without_hashtag"]) if ht_data["without_hashtag"] else 0
+                st.metric("ハッシュタグなし 平均いいね", f"{avg_no_ht:.0f}")
+
+            if ht_data["top_hashtags"]:
+                st.markdown("**人気ハッシュタグ:**")
+                for tag, count in ht_data["top_hashtags"][:10]:
+                    st.markdown(f"- {tag} ({count}件)")
+
+        except Exception as e:
+            st.error(f"分析に失敗: {e}")
+
+    elif advanced_type == "ユーザー分析":
+        try:
+            from analyze_posts import analyze_users, filter_keywords
+
+            # 重複除去前のデータを使用
+            df_raw = filter_keywords(df)
+
+            user_data = analyze_users(df_raw, df_filtered)
+
+            st.markdown("### リピートバズユーザー")
+            if user_data["repeat_buzzers"]:
+                repeat_df = pd.DataFrame(user_data["repeat_buzzers"][:20])
+                repeat_df.columns = ["ユーザー", "投稿数", "平均いいね", "最大いいね", "合計いいね", "標準偏差"]
+                st.dataframe(repeat_df, use_container_width=True)
+            else:
+                st.info("リピートバズユーザーが見つかりません")
+
+            st.markdown("---")
+            st.markdown("### 投稿頻度とエンゲージメント")
+            freq_df = pd.DataFrame([
+                {"投稿数": k, "ユーザー数": len(v), "平均いいね": sum(v)/len(v) if v else 0}
+                for k, v in user_data["freq_data"].items()
+            ])
+            st.dataframe(freq_df, use_container_width=True)
+
+            traits = user_data["common_traits"]
+            if traits["total"] > 0:
+                st.markdown("---")
+                st.markdown("### 常連バズアカウントの特徴")
+                avg_len = sum(traits["text_lengths"]) / len(traits["text_lengths"]) if traits["text_lengths"] else 0
+                st.markdown(f"- **平均投稿文字数:** {avg_len:.0f}字")
+                if traits["categories"]:
+                    top_cat = traits["categories"].most_common(1)[0]
+                    st.markdown(f"- **最多カテゴリ:** {top_cat[0]}（{top_cat[1]}件）")
+                cta_rate = (traits["cta_count"] / traits["total"]) * 100
+                st.markdown(f"- **CTA使用率:** {cta_rate:.0f}%")
+
+        except Exception as e:
+            st.error(f"分析に失敗: {e}")

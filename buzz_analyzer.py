@@ -114,7 +114,7 @@ def fetch_buzz_posts():
             "リプライ数": tweet.get("replyCount", 0),
             "投稿日時": tweet.get("createdAt", ""),
             "ユーザー名": username,
-            "フォロワー数": "未取得",
+            "フォロワー数": user.get("followersCount", 0),
             "ポストURL": post_url,
         })
 

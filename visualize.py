@@ -4,6 +4,7 @@ import os
 import re
 from collections import defaultdict
 
+import numpy as np
 import matplotlib
 matplotlib.use("Agg")  # GUIなし環境対応
 import matplotlib.pyplot as plt
@@ -225,7 +226,159 @@ def chart_likes_distribution(df, output_dir):
     return path
 
 
-def generate_all_charts(df, output_dir="output/charts"):
+def chart_text_length_scatter(df, output_dir):
+    """文字数×いいね数の散布図"""
+    from analyze_posts import classify_category
+
+    lengths = []
+    likes_list = []
+    cats = []
+    for _, row in df.iterrows():
+        text = _safe_text(row, "本文")
+        lengths.append(len(text))
+        likes_list.append(row.get("いいね数", 0))
+        cats.append(classify_category(text))
+
+    # カテゴリ別に色分け
+    unique_cats = list(set(cats))
+    cat_colors = {c: COLORS[i % len(COLORS)] for i, c in enumerate(unique_cats)}
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+
+    for cat in unique_cats:
+        x = [lengths[i] for i in range(len(cats)) if cats[i] == cat]
+        y = [likes_list[i] for i in range(len(cats)) if cats[i] == cat]
+        ax.scatter(x, y, c=cat_colors[cat], label=cat, alpha=0.6, s=50)
+
+    # 最適レンジをハイライト
+    from analyze_posts import analyze_text_length
+    tl_data = analyze_text_length(df)
+    best = tl_data["best_bucket"]
+    bucket_ranges = {
+        "0-50字": (0, 50), "51-100字": (51, 100), "101-150字": (101, 150),
+        "151-200字": (151, 200), "201-300字": (201, 300),
+        "301-500字": (301, 500), "500字以上": (501, max(lengths) if lengths else 1000),
+    }
+    if best in bucket_ranges:
+        lo, hi = bucket_ranges[best]
+        ax.axvspan(lo, hi, alpha=0.1, color="green", label=f"最適レンジ ({best})")
+
+    ax.set_xlabel("文字数" if FONT else "Character Count")
+    ax.set_ylabel("いいね数" if FONT else "Likes")
+    ax.set_title("文字数 × いいね数の関係" if FONT else "Character Count vs Likes")
+    ax.legend(fontsize=8, loc="upper right")
+    plt.tight_layout()
+
+    path = os.path.join(output_dir, "text_length_scatter.png")
+    fig.savefig(path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    return path
+
+
+def chart_buzz_score(df, output_dir):
+    """バズスコア×実いいね数の散布図 + スコア分布"""
+    from analyze_posts import calculate_buzz_score, analyze_text_length
+    tl_data = analyze_text_length(df)
+    score_params = {}
+    bucket_ranges = {
+        "0-50字": (0, 50), "51-100字": (51, 100), "101-150字": (101, 150),
+        "151-200字": (151, 200), "201-300字": (201, 300),
+        "301-500字": (301, 500), "500字以上": (501, 1000),
+    }
+    if tl_data["best_bucket"] in bucket_ranges:
+        rng = bucket_ranges[tl_data["best_bucket"]]
+        score_params["optimal_min"] = rng[0]
+        score_params["optimal_max"] = rng[1]
+
+    scores = []
+    likes_list = []
+    for _, row in df.iterrows():
+        text = _safe_text(row, "本文")
+        result = calculate_buzz_score(text, score_params)
+        scores.append(result["total_score"])
+        likes_list.append(row.get("いいね数", 0))
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
+
+    # 左: 散布図 + トレンドライン
+    ax1.scatter(scores, likes_list, alpha=0.5, c="#4472C4", s=40)
+    if len(scores) > 2:
+        z = np.polyfit(scores, likes_list, 1)
+        p = np.poly1d(z)
+        x_line = np.linspace(min(scores), max(scores), 100)
+        ax1.plot(x_line, p(x_line), "--", color="#ED7D31", linewidth=2, label="トレンドライン")
+        ax1.legend()
+    ax1.set_xlabel("バズスコア" if FONT else "Buzz Score")
+    ax1.set_ylabel("いいね数" if FONT else "Likes")
+    ax1.set_title("バズスコア × 実際のいいね数" if FONT else "Buzz Score vs Likes")
+
+    # 右: スコア分布ヒストグラム
+    ax2.hist(scores, bins=15, color="#70AD47", edgecolor="white", alpha=0.8)
+    mean_score = sum(scores) / len(scores) if scores else 0
+    ax2.axvline(mean_score, color="#ED7D31", linestyle="--", linewidth=2,
+                label=f"平均: {mean_score:.0f}点")
+    ax2.set_xlabel("バズスコア" if FONT else "Buzz Score")
+    ax2.set_ylabel("投稿数" if FONT else "Post Count")
+    ax2.set_title("バズスコアの分布" if FONT else "Buzz Score Distribution")
+    ax2.legend()
+
+    plt.tight_layout()
+    path = os.path.join(output_dir, "buzz_score.png")
+    fig.savefig(path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    return path
+
+
+def chart_user_analysis(df_raw, output_dir):
+    """ユーザー分析: 投稿数×平均いいねバブルチャート"""
+    user_stats = {}
+    for _, row in df_raw.iterrows():
+        user = row.get("ユーザー名", "")
+        likes = row.get("いいね数", 0)
+        if user not in user_stats:
+            user_stats[user] = {"likes": [], "total": 0}
+        user_stats[user]["likes"].append(likes)
+        user_stats[user]["total"] += likes
+
+    post_counts = []
+    avg_likes = []
+    total_likes = []
+    labels = []
+
+    for user, stats in user_stats.items():
+        count = len(stats["likes"])
+        avg = sum(stats["likes"]) / count if count > 0 else 0
+        post_counts.append(count)
+        avg_likes.append(avg)
+        total_likes.append(stats["total"])
+        labels.append(user)
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+
+    # バブルサイズ = 合計いいね
+    max_total = max(total_likes) if total_likes else 1
+    sizes = [max(30, (t / max_total) * 500) for t in total_likes]
+
+    scatter = ax.scatter(post_counts, avg_likes, s=sizes, alpha=0.5, c="#4472C4", edgecolors="white")
+
+    # リピーターにラベル
+    for i, (pc, al, label) in enumerate(zip(post_counts, avg_likes, labels)):
+        if pc >= 2:
+            ax.annotate(f"@{label}", (pc, al), fontsize=7, alpha=0.7,
+                        xytext=(5, 5), textcoords="offset points")
+
+    ax.set_xlabel("投稿数" if FONT else "Post Count")
+    ax.set_ylabel("平均いいね数" if FONT else "Avg Likes")
+    ax.set_title("ユーザー別 投稿数 × 平均いいね数" if FONT else "Posts vs Avg Likes per User")
+    plt.tight_layout()
+
+    path = os.path.join(output_dir, "user_analysis.png")
+    fig.savefig(path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    return path
+
+
+def generate_all_charts(df, output_dir="output/charts", df_raw=None):
     """全チャートを生成"""
     os.makedirs(output_dir, exist_ok=True)
 
@@ -245,6 +398,31 @@ def generate_all_charts(df, output_dir="output/charts"):
             print(f"  ✓ {name}: {path}")
         except Exception as e:
             print(f"  ✗ {name}: {e}")
+
+    # 新規チャート: 文字数散布図
+    try:
+        path = chart_text_length_scatter(df, output_dir)
+        results["文字数×いいね数散布図"] = path
+        print(f"  ✓ 文字数×いいね数散布図: {path}")
+    except Exception as e:
+        print(f"  ✗ 文字数×いいね数散布図: {e}")
+
+    # 新規チャート: バズスコア分析
+    try:
+        path = chart_buzz_score(df, output_dir)
+        results["バズスコア分析"] = path
+        print(f"  ✓ バズスコア分析: {path}")
+    except Exception as e:
+        print(f"  ✗ バズスコア分析: {e}")
+
+    # 新規チャート: ユーザー分析
+    if df_raw is not None:
+        try:
+            path = chart_user_analysis(df_raw, output_dir)
+            results["ユーザー分析"] = path
+            print(f"  ✓ ユーザー分析: {path}")
+        except Exception as e:
+            print(f"  ✗ ユーザー分析: {e}")
 
     return results
 

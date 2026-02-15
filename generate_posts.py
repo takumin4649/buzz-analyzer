@@ -404,10 +404,10 @@ def generate_posts(df, n=5, topic=None):
     return posts, tools, works, ctas
 
 
-def format_posts_markdown(posts, tools, works, ctas):
+def format_posts_markdown(posts, tools, works, ctas, section_num=8):
     """生成した投稿をMarkdown形式でフォーマット"""
     lines = []
-    lines.append("## 8. バズポスト自動生成（テンプレート）\n")
+    lines.append(f"## {section_num}. バズポスト自動生成（テンプレート）\n")
     lines.append("分析データに基づいて、バズりやすい投稿テンプレートを自動生成しました。\n")
     lines.append("**自分の経験・数字に置き換えて使ってください。**\n")
 
