@@ -8,6 +8,10 @@ from datetime import datetime, timedelta
 from collections import Counter
 from statistics import mean, median
 
+# Windows環境での文字化け対策
+if sys.platform == "win32":
+    sys.stdout.reconfigure(encoding='utf-8')
+
 import requests
 from dotenv import load_dotenv
 from openpyxl import Workbook
@@ -33,40 +37,72 @@ TARGET_ACCOUNTS = [
 
 def fetch_user_tweets(username, api_key, count=100):
     """指定されたユーザーの投稿を取得"""
-    url = "https://api.twitterapi.io/twitter/user/tweets"
+    url = "https://api.twitterapi.io/twitter/user/last_tweets"
     headers = {"X-API-Key": api_key}
     params = {
-        "username": username,
-        "count": count,
+        "userName": username,  # 正しいパラメータ名
+        "includeReplies": False,  # リプライを除外
     }
 
     print(f"  @{username} の投稿を取得中...")
 
-    try:
-        response = requests.get(url, headers=headers, params=params, timeout=30)
-        response.raise_for_status()
-        data = response.json()
-    except requests.exceptions.ConnectionError:
-        print(f"エラー: APIサーバーに接続できません（@{username}）")
-        return []
-    except requests.exceptions.Timeout:
-        print(f"エラー: APIリクエストがタイムアウトしました（@{username}）")
-        return []
-    except requests.exceptions.HTTPError as e:
-        if response.status_code == 401:
-            print(f"エラー: APIキーが無効です（@{username}）")
-        elif response.status_code == 429:
-            print(f"エラー: APIのレート制限に達しました（@{username}）")
-        else:
-            print(f"エラー: APIリクエストに失敗しました（@{username}）: HTTP {response.status_code}")
-        return []
-    except Exception as e:
-        print(f"エラー: 予期しないエラーが発生しました（@{username}）: {e}")
-        return []
+    all_tweets = []
+    cursor = None
 
-    tweets = data.get("tweets", [])
-    print(f"    → {len(tweets)}件取得")
-    return tweets
+    # ページネーションで最大count件まで取得
+    while len(all_tweets) < count:
+        if cursor:
+            params["cursor"] = cursor
+
+        try:
+            response = requests.get(url, headers=headers, params=params, timeout=30)
+            response.raise_for_status()
+            data = response.json()
+
+            # エラーレスポンスのチェック
+            if data.get("status") == "error":
+                print(f"エラー: {data.get('message', '不明なエラー')}（@{username}）")
+                return all_tweets
+
+            # ツイートを取得（data.data.tweetsからアクセス）
+            data_content = data.get("data", {})
+            tweets = data_content.get("tweets", [])
+            if not tweets:
+                break
+
+            all_tweets.extend(tweets)
+
+            # 次のページがあるかチェック（トップレベルから取得）
+            has_next = data.get("has_next_page", False)
+            if not has_next:
+                break
+
+            cursor = data.get("next_cursor")
+            if not cursor:
+                break
+
+        except requests.exceptions.ConnectionError:
+            print(f"エラー: APIサーバーに接続できません（@{username}）")
+            return all_tweets
+        except requests.exceptions.Timeout:
+            print(f"エラー: APIリクエストがタイムアウトしました（@{username}）")
+            return all_tweets
+        except requests.exceptions.HTTPError as e:
+            if response.status_code == 401:
+                print(f"エラー: APIキーが無効です（@{username}）")
+            elif response.status_code == 429:
+                print(f"エラー: APIのレート制限に達しました（@{username}）")
+            else:
+                print(f"エラー: APIリクエストに失敗しました（@{username}）: HTTP {response.status_code}")
+            return all_tweets
+        except Exception as e:
+            print(f"エラー: 予期しないエラーが発生しました（@{username}）: {e}")
+            return all_tweets
+
+    # 必要な件数に制限
+    all_tweets = all_tweets[:count]
+    print(f"    → {len(all_tweets)}件取得")
+    return all_tweets
 
 
 def classify_opening_pattern(text):
@@ -447,7 +483,7 @@ def main():
     api_key = os.environ.get("TWITTER_API_KEY")
     if not api_key:
         print("エラー: 環境変数 TWITTER_API_KEY が設定されていません。")
-        print("設定例: export TWITTER_API_KEY='your-api-key'")
+        print(".envファイルの読み込みを確認してください。")
         sys.exit(1)
 
     print("=" * 60)
@@ -475,8 +511,8 @@ def main():
 
         # レート制限対策：最後のアカウント以外は待機
         if i < len(TARGET_ACCOUNTS) - 1:
-            print("    レート制限対策で3秒待機中...")
-            time.sleep(3)
+            print("    レート制限対策で10秒待機中...")
+            time.sleep(10)
 
         print()
 
