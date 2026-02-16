@@ -4,6 +4,7 @@ import os
 import sys
 import time
 import re
+import argparse
 from datetime import datetime, timedelta
 from collections import Counter
 from statistics import mean, median
@@ -14,7 +15,7 @@ if sys.platform == "win32":
 
 import requests
 from dotenv import load_dotenv
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, PatternFill, Alignment
 from openpyxl.utils import get_column_letter
 
@@ -33,6 +34,91 @@ TARGET_ACCOUNTS = [
     "takkun_life_ea",
     "ai_nepro",
 ]
+
+
+def load_test_data_from_excel(excel_path):
+    """テストモード用：既存のExcelファイルからデータを読み込む"""
+    print(f"📂 テストモード: {excel_path} からデータを読み込み中...")
+
+    if not os.path.exists(excel_path):
+        print(f"エラー: ファイルが見つかりません: {excel_path}")
+        return {}
+
+    wb = load_workbook(excel_path)
+    ws = wb[wb.sheetnames[0]]  # 最初のシートを使用
+
+    # ヘッダー行を読み込み
+    headers = [cell.value for cell in ws[1]]
+
+    # カラム名のマッピング（柔軟に対応）
+    column_mapping = {}
+    for i, header in enumerate(headers, 1):
+        if header in ["本文", "text", "テキスト"]:
+            column_mapping["text"] = i
+        elif header in ["いいね数", "likeCount", "likes"]:
+            column_mapping["likeCount"] = i
+        elif header in ["リポスト数", "RT数", "retweetCount", "retweets"]:
+            column_mapping["retweetCount"] = i
+        elif header in ["リプライ数", "replyCount", "replies"]:
+            column_mapping["replyCount"] = i
+        elif header in ["投稿日時", "createdAt", "created_at"]:
+            column_mapping["createdAt"] = i
+        elif header in ["ユーザー名", "userName", "username", "user_name"]:
+            column_mapping["userName"] = i
+        elif header in ["ポストURL", "投稿URL", "url", "tweet_url"]:
+            column_mapping["url"] = i
+
+    print(f"  カラムマッピング: {column_mapping}")
+
+    # データを読み込み（ユーザーごとにグループ化）
+    tweets_by_user = {}
+    total_tweets = 0
+
+    for row in range(2, ws.max_row + 1):
+        # 各カラムの値を取得
+        text = ws.cell(row, column_mapping.get("text", 1)).value or ""
+        like_count = ws.cell(row, column_mapping.get("likeCount", 2)).value or 0
+        retweet_count = ws.cell(row, column_mapping.get("retweetCount", 3)).value or 0
+        reply_count = ws.cell(row, column_mapping.get("replyCount", 4)).value or 0
+        created_at = ws.cell(row, column_mapping.get("createdAt", 5)).value or ""
+        username = ws.cell(row, column_mapping.get("userName", 6)).value or "unknown"
+        post_url = ws.cell(row, column_mapping.get("url", 8)).value or ""
+
+        # ユーザー名を正規化（@を除去）
+        if isinstance(username, str):
+            username = username.lstrip("@")
+
+        # ポストURLからIDを抽出
+        tweet_id = ""
+        if post_url:
+            match = re.search(r"/status/(\d+)", post_url)
+            if match:
+                tweet_id = match.group(1)
+
+        # Tweet形式に変換
+        tweet = {
+            "text": text,
+            "likeCount": int(like_count) if isinstance(like_count, (int, float)) else 0,
+            "retweetCount": int(retweet_count) if isinstance(retweet_count, (int, float)) else 0,
+            "replyCount": int(reply_count) if isinstance(reply_count, (int, float)) else 0,
+            "createdAt": str(created_at),
+            "id": tweet_id,
+            "author": {
+                "userName": username,
+            },
+        }
+
+        # ユーザーごとに分類
+        if username not in tweets_by_user:
+            tweets_by_user[username] = []
+        tweets_by_user[username].append(tweet)
+        total_tweets += 1
+
+    print(f"  ✅ 読み込み完了: {total_tweets}件のツイート、{len(tweets_by_user)}アカウント")
+    for username, tweets in tweets_by_user.items():
+        print(f"     - @{username}: {len(tweets)}件")
+
+    return tweets_by_user
 
 
 def fetch_user_tweets(username, api_key, count=100):
@@ -861,44 +947,70 @@ def save_to_excel(all_tweets_by_account, output_path):
     print(f"Excel保存完了: {output_path}")
 
 
-def main():
+def main(test_mode=False, test_file=None):
     """メイン処理"""
-    # APIキー取得
-    api_key = os.environ.get("TWITTER_API_KEY")
-    if not api_key:
-        print("エラー: 環境変数 TWITTER_API_KEY が設定されていません。")
-        print(".envファイルの読み込みを確認してください。")
-        sys.exit(1)
-
     print("=" * 60)
     print("Xアカウント分析スクリプト")
+    if test_mode:
+        print("【テストモード】")
     print("=" * 60)
-    print(f"対象アカウント数: {len(TARGET_ACCOUNTS)}個")
     print()
 
     # 各アカウントの投稿を取得
     all_tweets_by_account = {}
     all_analyses = []
 
-    for i, username in enumerate(TARGET_ACCOUNTS):
-        print(f"[{i+1}/{len(TARGET_ACCOUNTS)}] @{username} を処理中...")
+    if test_mode:
+        # テストモード: 既存Excelファイルから読み込み
+        if not test_file:
+            test_file = "output/buzz_posts_20260215.xlsx"
 
-        tweets = fetch_user_tweets(username, api_key, count=100)
+        all_tweets_by_account = load_test_data_from_excel(test_file)
+        print()
 
-        if tweets:
-            all_tweets_by_account[username] = tweets
+        if not all_tweets_by_account:
+            print("エラー: テストデータが読み込めませんでした。")
+            sys.exit(1)
 
-            # アカウント分析を実行
+        # アカウントごとに分析
+        print("分析を実行中...")
+        for username, tweets in all_tweets_by_account.items():
+            print(f"  @{username} を分析中...")
             analysis = analyze_account(username, tweets)
             if analysis:
                 all_analyses.append(analysis)
-
-        # レート制限対策：最後のアカウント以外は待機
-        if i < len(TARGET_ACCOUNTS) - 1:
-            print("    レート制限対策で10秒待機中...")
-            time.sleep(10)
-
         print()
+
+    else:
+        # APIモード: 通常のAPI取得
+        api_key = os.environ.get("TWITTER_API_KEY")
+        if not api_key:
+            print("エラー: 環境変数 TWITTER_API_KEY が設定されていません。")
+            print(".envファイルの読み込みを確認してください。")
+            sys.exit(1)
+
+        print(f"対象アカウント数: {len(TARGET_ACCOUNTS)}個")
+        print()
+
+        for i, username in enumerate(TARGET_ACCOUNTS):
+            print(f"[{i+1}/{len(TARGET_ACCOUNTS)}] @{username} を処理中...")
+
+            tweets = fetch_user_tweets(username, api_key, count=100)
+
+            if tweets:
+                all_tweets_by_account[username] = tweets
+
+                # アカウント分析を実行
+                analysis = analyze_account(username, tweets)
+                if analysis:
+                    all_analyses.append(analysis)
+
+            # レート制限対策：最後のアカウント以外は待機
+            if i < len(TARGET_ACCOUNTS) - 1:
+                print("    レート制限対策で10秒待機中...")
+                time.sleep(10)
+
+            print()
 
     if not all_analyses:
         print("分析可能なデータが取得できませんでした。")
@@ -917,9 +1029,12 @@ def main():
     print("Markdownレポートを生成中...")
     generate_markdown_report(all_analyses, md_path)
 
-    # Excel保存
-    print("Excelファイルを生成中...")
-    save_to_excel(all_tweets_by_account, excel_path)
+    # Excel保存（テストモードでは既存データを保存）
+    if not test_mode:
+        print("Excelファイルを生成中...")
+        save_to_excel(all_tweets_by_account, excel_path)
+    else:
+        print("（テストモードのため、Excel生成はスキップ）")
 
     print()
     print("=" * 60)
@@ -928,4 +1043,20 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    # コマンドライン引数の解析
+    parser = argparse.ArgumentParser(description="Xアカウント分析スクリプト")
+    parser.add_argument(
+        "--test",
+        action="store_true",
+        help="テストモード（既存Excelファイルから読み込み、API呼び出しなし）",
+    )
+    parser.add_argument(
+        "--test-file",
+        type=str,
+        default="output/buzz_posts_20260215.xlsx",
+        help="テストモードで使用するExcelファイルのパス",
+    )
+
+    args = parser.parse_args()
+
+    main(test_mode=args.test, test_file=args.test_file)
