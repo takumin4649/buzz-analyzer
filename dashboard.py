@@ -82,6 +82,21 @@ min_likes = st.sidebar.slider(
     step=50,
 )
 
+# フォロワー帯フィルタ
+df["フォロワー数_num"] = pd.to_numeric(df["フォロワー数"], errors="coerce").fillna(0).astype(int)
+has_follower_data = (df["フォロワー数_num"] > 0).sum() >= 5
+if has_follower_data:
+    max_followers = int(df["フォロワー数_num"].max())
+    follower_range = st.sidebar.slider(
+        "フォロワー数の範囲",
+        min_value=0,
+        max_value=max_followers,
+        value=(0, max_followers),
+        step=100,
+    )
+else:
+    follower_range = None
+
 categories = st.sidebar.multiselect(
     "カテゴリ",
     options=sorted(df["カテゴリ"].unique()),
@@ -95,6 +110,11 @@ df_filtered = df[df["いいね数"] >= min_likes]
 df_filtered = df_filtered[df_filtered["カテゴリ"].isin(categories)]
 if keyword_filter:
     df_filtered = df_filtered[df_filtered["本文"].str.contains(keyword_filter, na=False)]
+if follower_range is not None:
+    df_filtered = df_filtered[
+        (df_filtered["フォロワー数_num"] >= follower_range[0]) &
+        (df_filtered["フォロワー数_num"] <= follower_range[1])
+    ]
 
 st.sidebar.markdown(f"**表示件数:** {len(df_filtered)} / {len(df)}件")
 
@@ -316,7 +336,7 @@ with tab5:
 
     advanced_type = st.selectbox(
         "分析タイプを選択",
-        ["バズ予測スコア", "テキスト最適化", "ユーザー分析"],
+        ["バズ予測スコア", "テキスト最適化", "ユーザー分析", "バイラル係数", "競合ポジション", "フック強度", "議論誘発度"],
         key="advanced_analysis",
     )
 
@@ -464,6 +484,98 @@ with tab5:
                     st.markdown(f"- **最多カテゴリ:** {top_cat[0]}（{top_cat[1]}件）")
                 cta_rate = (traits["cta_count"] / traits["total"]) * 100
                 st.markdown(f"- **CTA使用率:** {cta_rate:.0f}%")
+
+        except Exception as e:
+            st.error(f"分析に失敗: {e}")
+
+    elif advanced_type == "バイラル係数":
+        try:
+            from analyze_posts import analyze_viral_coefficient
+            viral = analyze_viral_coefficient(df_filtered)
+
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("平均バイラル係数", f"{viral['avg_coeff']:.3f}")
+            with col2:
+                st.metric("中央値", f"{viral['median_coeff']:.3f}")
+
+            st.markdown("### カテゴリ別バイラル係数")
+            cat_df = pd.DataFrame([
+                {"カテゴリ": k, "バイラル係数": v} for k, v in
+                sorted(viral["cat_viral"].items(), key=lambda x: x[1], reverse=True)
+            ])
+            st.dataframe(cat_df, use_container_width=True)
+
+            st.markdown("### 拡散力TOP10")
+            for i, item in enumerate(viral["top10_viral"][:10], 1):
+                st.markdown(f"{i}. **{item['likes']:,}いいね / {item['retweets']:,}RT** (係数: {item['viral_coeff']:.3f}) - {item['text']}...")
+
+        except Exception as e:
+            st.error(f"分析に失敗: {e}")
+
+    elif advanced_type == "競合ポジション":
+        try:
+            from analyze_posts import analyze_competitive_position
+            comp = analyze_competitive_position(df_filtered)
+
+            st.markdown("### 四象限マトリクス")
+            pos_df = pd.DataFrame(comp["positions"])
+            pos_df.columns = ["カテゴリ", "投稿数", "平均いいね", "ポジション"]
+            st.dataframe(pos_df, use_container_width=True)
+
+            blue = [p for p in comp["positions"] if "ブルーオーシャン" in p["quadrant"]]
+            if blue:
+                st.success("**狙い目:** " + ", ".join(p["category"] for p in blue))
+            red = [p for p in comp["positions"] if "レッドオーシャン" in p["quadrant"]]
+            if red:
+                st.warning("**飽和:** " + ", ".join(p["category"] for p in red))
+
+        except Exception as e:
+            st.error(f"分析に失敗: {e}")
+
+    elif advanced_type == "フック強度":
+        try:
+            from analyze_posts import analyze_hook_strength
+            hook = analyze_hook_strength(df_filtered)
+
+            st.markdown("### パワーワード種類別の効果")
+            pw_df = pd.DataFrame([
+                {"パワーワード": k, "件数": len(v), "平均いいね": sum(v)/len(v) if v else 0}
+                for k, v in sorted(hook["pw_type_data"].items(), key=lambda x: sum(x[1])/len(x[1]) if x[1] else 0, reverse=True)
+            ])
+            st.dataframe(pw_df, use_container_width=True)
+            if pw_df is not None and len(pw_df) > 0:
+                st.bar_chart(pw_df.set_index("パワーワード")["平均いいね"])
+
+            st.markdown("### TOP10高パフォーマンスフック")
+            for i, h in enumerate(hook["top_hooks"][:10], 1):
+                pw_str = ", ".join(h["power_words"]) if h["power_words"] else "なし"
+                st.markdown(f"{i}. **{h['likes']:,}いいね** [{pw_str}] - {h['first_line']}")
+
+        except Exception as e:
+            st.error(f"分析に失敗: {e}")
+
+    elif advanced_type == "議論誘発度":
+        try:
+            from analyze_posts import analyze_discussion_inducement
+            disc = analyze_discussion_inducement(df_filtered)
+
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("平均議論誘発度", f"{disc['avg_rate']:.3f}")
+            with col2:
+                st.metric("中央値", f"{disc['median_rate']:.3f}")
+
+            st.markdown("### カテゴリ別議論誘発度")
+            cat_df = pd.DataFrame([
+                {"カテゴリ": k, "議論誘発度": v} for k, v in
+                sorted(disc["cat_discussion"].items(), key=lambda x: x[1], reverse=True)
+            ])
+            st.dataframe(cat_df, use_container_width=True)
+
+            st.markdown("### 議論を呼ぶポストTOP10")
+            for i, item in enumerate(disc["top10_discussion"][:10], 1):
+                st.markdown(f"{i}. **{item['likes']:,}いいね / {item['replies']}リプ** (誘発度: {item['discussion_rate']:.3f}) - {item['text']}...")
 
         except Exception as e:
             st.error(f"分析に失敗: {e}")

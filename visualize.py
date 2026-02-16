@@ -378,6 +378,73 @@ def chart_user_analysis(df_raw, output_dir):
     return path
 
 
+def chart_competitive_position(df, output_dir):
+    """競合ポジション四象限マトリクス"""
+    from analyze_posts import classify_category
+
+    cat_data = defaultdict(list)
+    for _, row in df.iterrows():
+        text = _safe_text(row, "本文")
+        cat = classify_category(text)
+        cat_data[cat].append(row.get("いいね数", 0))
+
+    categories = []
+    counts = []
+    avgs = []
+    for cat, likes in cat_data.items():
+        categories.append(cat)
+        counts.append(len(likes))
+        avgs.append(sum(likes) / len(likes) if likes else 0)
+
+    median_count = sorted(counts)[len(counts) // 2] if counts else 0
+    median_avg = sorted(avgs)[len(avgs) // 2] if avgs else 0
+
+    fig, ax = plt.subplots(figsize=(10, 8))
+
+    # 四象限の背景色
+    ax.axhline(y=median_avg, color="gray", linestyle="--", alpha=0.5)
+    ax.axvline(x=median_count, color="gray", linestyle="--", alpha=0.5)
+
+    # バブルチャート
+    sizes = [max(100, a * 0.5) for a in avgs]
+    colors_map = []
+    for c, a in zip(counts, avgs):
+        if c > median_count and a > median_avg:
+            colors_map.append("#ED7D31")  # 激戦区
+        elif c <= median_count and a > median_avg:
+            colors_map.append("#70AD47")  # ブルーオーシャン
+        elif c > median_count and a <= median_avg:
+            colors_map.append("#E74C3C")  # レッドオーシャン
+        else:
+            colors_map.append("#A5A5A5")  # ニッチ
+
+    ax.scatter(counts, avgs, s=sizes, c=colors_map, alpha=0.7, edgecolors="white", linewidth=2)
+
+    for cat, cnt, avg in zip(categories, counts, avgs):
+        ax.annotate(cat, (cnt, avg), fontsize=9, ha="center",
+                    xytext=(0, 12), textcoords="offset points")
+
+    # 象限ラベル
+    ax.text(0.02, 0.98, "ブルーオーシャン\n(低投稿×高エンゲージ)", transform=ax.transAxes,
+            fontsize=8, va="top", color="#70AD47", alpha=0.7)
+    ax.text(0.98, 0.98, "激戦区\n(高投稿×高エンゲージ)", transform=ax.transAxes,
+            fontsize=8, va="top", ha="right", color="#ED7D31", alpha=0.7)
+    ax.text(0.02, 0.02, "ニッチ\n(低投稿×低エンゲージ)", transform=ax.transAxes,
+            fontsize=8, va="bottom", color="#A5A5A5", alpha=0.7)
+    ax.text(0.98, 0.02, "レッドオーシャン\n(高投稿×低エンゲージ)", transform=ax.transAxes,
+            fontsize=8, va="bottom", ha="right", color="#E74C3C", alpha=0.7)
+
+    ax.set_xlabel("投稿数" if FONT else "Post Count")
+    ax.set_ylabel("平均いいね数" if FONT else "Avg Likes")
+    ax.set_title("競合ポジション マトリクス" if FONT else "Competitive Position Matrix")
+    plt.tight_layout()
+
+    path = os.path.join(output_dir, "competitive_position.png")
+    fig.savefig(path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    return path
+
+
 def generate_all_charts(df, output_dir="output/charts", df_raw=None):
     """全チャートを生成"""
     os.makedirs(output_dir, exist_ok=True)
@@ -423,6 +490,14 @@ def generate_all_charts(df, output_dir="output/charts", df_raw=None):
             print(f"  ✓ ユーザー分析: {path}")
         except Exception as e:
             print(f"  ✗ ユーザー分析: {e}")
+
+    # 新規チャート: 競合ポジション
+    try:
+        path = chart_competitive_position(df, output_dir)
+        results["競合ポジション"] = path
+        print(f"  ✓ 競合ポジション: {path}")
+    except Exception as e:
+        print(f"  ✗ 競合ポジション: {e}")
 
     return results
 

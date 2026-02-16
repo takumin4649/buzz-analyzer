@@ -826,6 +826,328 @@ def analyze_users(df_raw, df_filtered):
     }
 
 
+# === 新規分析関数: フォロワー帯別フィルタ分析 ===
+
+FOLLOWER_TIERS_DEFAULT = [
+    ("〜500人", 0, 500),
+    ("501〜1000人", 501, 1000),
+    ("1001〜5000人", 1001, 5000),
+    ("5001〜10000人", 5001, 10000),
+    ("10001人以上", 10001, 999999999),
+]
+
+
+def analyze_by_follower_tier(df, tiers=None):
+    """フォロワー帯別の分析"""
+    if tiers is None:
+        tiers = FOLLOWER_TIERS_DEFAULT
+
+    df_work = df.copy()
+    df_work["フォロワー数"] = pd.to_numeric(df_work["フォロワー数"], errors="coerce").fillna(0).astype(int)
+
+    has_data = (df_work["フォロワー数"] > 0).sum() >= 5
+    if not has_data:
+        return {"has_data": False, "tiers": []}
+
+    valid = df_work[df_work["フォロワー数"] > 0].copy()
+
+    # 自動四分位も計算
+    q25, q50, q75 = valid["フォロワー数"].quantile([0.25, 0.5, 0.75])
+    auto_tiers = [
+        (f"下位25%（〜{int(q25)}人）", 0, int(q25)),
+        (f"25-50%（{int(q25)+1}〜{int(q50)}人）", int(q25) + 1, int(q50)),
+        (f"50-75%（{int(q50)+1}〜{int(q75)}人）", int(q50) + 1, int(q75)),
+        (f"上位25%（{int(q75)+1}人〜）", int(q75) + 1, 999999999),
+    ]
+
+    results = {"has_data": True, "tiers": [], "auto_tiers": []}
+
+    for label, lo, hi in tiers:
+        tier_df = valid[(valid["フォロワー数"] >= lo) & (valid["フォロワー数"] <= hi)]
+        if len(tier_df) == 0:
+            continue
+        tier_df = tier_df.copy()
+        tier_df["エンゲージメント率"] = (tier_df["いいね数"] / tier_df["フォロワー数"]) * 100
+
+        # カテゴリ別
+        cat_data = defaultdict(list)
+        for _, row in tier_df.iterrows():
+            cat = classify_category(safe_get(row, "本文", ""))
+            cat_data[cat].append(row["いいね数"])
+
+        best_cat = max(cat_data.items(), key=lambda x: sum(x[1]) / len(x[1]) if x[1] else 0) if cat_data else ("不明", [0])
+
+        results["tiers"].append({
+            "label": label,
+            "count": len(tier_df),
+            "avg_likes": float(tier_df["いいね数"].mean()),
+            "avg_engagement_rate": float(tier_df["エンゲージメント率"].mean()),
+            "median_likes": float(tier_df["いいね数"].median()),
+            "best_category": best_cat[0],
+            "best_cat_avg": sum(best_cat[1]) / len(best_cat[1]) if best_cat[1] else 0,
+        })
+
+    for label, lo, hi in auto_tiers:
+        tier_df = valid[(valid["フォロワー数"] >= lo) & (valid["フォロワー数"] <= hi)]
+        if len(tier_df) == 0:
+            continue
+        tier_df = tier_df.copy()
+        tier_df["エンゲージメント率"] = (tier_df["いいね数"] / tier_df["フォロワー数"]) * 100
+        results["auto_tiers"].append({
+            "label": label,
+            "count": len(tier_df),
+            "avg_likes": float(tier_df["いいね数"].mean()),
+            "avg_engagement_rate": float(tier_df["エンゲージメント率"].mean()),
+        })
+
+    return results
+
+
+# === 新規分析関数: バイラル係数分析 ===
+
+def analyze_viral_coefficient(df):
+    """バイラル係数（RT/いいね比率）分析"""
+    viral_data = []
+
+    for _, row in df.iterrows():
+        likes = safe_get(row, "いいね数", 0)
+        retweets = safe_get(row, "リポスト数", 0)
+        replies = safe_get(row, "リプライ数", 0)
+        text = safe_get(row, "本文", "")
+
+        if likes > 0:
+            viral_coeff = retweets / likes
+            viral_data.append({
+                "text": text[:60],
+                "likes": likes,
+                "retweets": retweets,
+                "viral_coeff": viral_coeff,
+                "category": classify_category(text),
+                "user": safe_get(row, "ユーザー名", ""),
+            })
+
+    # 高バイラル vs 低バイラル
+    viral_data.sort(key=lambda x: x["viral_coeff"], reverse=True)
+    median_coeff = sorted([d["viral_coeff"] for d in viral_data])[len(viral_data) // 2] if viral_data else 0
+
+    high_viral = [d for d in viral_data if d["viral_coeff"] > median_coeff]
+    low_viral = [d for d in viral_data if d["viral_coeff"] <= median_coeff]
+
+    # カテゴリ別バイラル係数
+    cat_viral = defaultdict(list)
+    for d in viral_data:
+        cat_viral[d["category"]].append(d["viral_coeff"])
+
+    # 冒頭パターン別バイラル係数
+    pattern_viral = defaultdict(list)
+    for d in viral_data:
+        first_line = d["text"].split("\n")[0] if d["text"] else ""
+        pattern = classify_opening_pattern(first_line)
+        pattern_viral[pattern].append(d["viral_coeff"])
+
+    return {
+        "top10_viral": viral_data[:10],
+        "median_coeff": median_coeff,
+        "avg_coeff": sum(d["viral_coeff"] for d in viral_data) / len(viral_data) if viral_data else 0,
+        "high_viral_traits": {
+            "avg_likes": sum(d["likes"] for d in high_viral) / len(high_viral) if high_viral else 0,
+            "count": len(high_viral),
+        },
+        "low_viral_traits": {
+            "avg_likes": sum(d["likes"] for d in low_viral) / len(low_viral) if low_viral else 0,
+            "count": len(low_viral),
+        },
+        "cat_viral": {k: sum(v) / len(v) if v else 0 for k, v in cat_viral.items()},
+        "pattern_viral": {k: sum(v) / len(v) if v else 0 for k, v in pattern_viral.items()},
+    }
+
+
+# === 新規分析関数: 競合ポジション分析 ===
+
+def analyze_competitive_position(df):
+    """競合ポジション分析: カテゴリ×投稿数 vs 平均いいね"""
+    cat_data = defaultdict(list)
+
+    for _, row in df.iterrows():
+        text = safe_get(row, "本文", "")
+        likes = safe_get(row, "いいね数", 0)
+        cat = classify_category(text)
+        cat_data[cat].append(likes)
+
+    positions = []
+    all_counts = [len(v) for v in cat_data.values()]
+    all_avgs = [sum(v) / len(v) if v else 0 for v in cat_data.values()]
+    median_count = sorted(all_counts)[len(all_counts) // 2] if all_counts else 0
+    median_avg = sorted(all_avgs)[len(all_avgs) // 2] if all_avgs else 0
+
+    for cat, likes in cat_data.items():
+        count = len(likes)
+        avg = sum(likes) / count if count > 0 else 0
+
+        # 四象限分類
+        if count > median_count and avg > median_avg:
+            quadrant = "激戦区（高投稿×高エンゲージ）"
+        elif count <= median_count and avg > median_avg:
+            quadrant = "ブルーオーシャン（低投稿×高エンゲージ）"
+        elif count > median_count and avg <= median_avg:
+            quadrant = "レッドオーシャン（高投稿×低エンゲージ）"
+        else:
+            quadrant = "ニッチ（低投稿×低エンゲージ）"
+
+        positions.append({
+            "category": cat,
+            "count": count,
+            "avg_likes": avg,
+            "quadrant": quadrant,
+        })
+
+    return {
+        "positions": sorted(positions, key=lambda x: x["avg_likes"], reverse=True),
+        "median_count": median_count,
+        "median_avg": median_avg,
+    }
+
+
+# === 新規分析関数: フック強度分析 ===
+
+POWER_WORDS = {
+    "数字系": re.compile(r'[0-9０-９]+[万円個件つ選ステップヶ月日時間分秒%％]'),
+    "緊急系": re.compile(r'今すぐ|まだ間に合う|急げ|限定|速報|最新|すぐ消す|期間限定'),
+    "疑問系": re.compile(r'[？?]|知ってる|ですか'),
+    "衝撃系": re.compile(r'まじ[でか]|やばい|ヤバい|衝撃|驚愕|は[？?]|えぐい'),
+    "否定系": re.compile(r'しない|やめて|やめろ|するな|ダメ|損|間違い|失敗'),
+    "秘匿系": re.compile(r'秘密|裏技|こっそり|実は|本当は|ぶっちゃけ|内緒'),
+    "簡単系": re.compile(r'簡単|誰でも|初心者|ゼロから|だけ[。！!]|これだけ'),
+    "権威系": re.compile(r'プロ|専門|公式|証明|実証|データ|研究|調査'),
+    "対比系": re.compile(r'→|⇒|から|前は|今は|before|after|ビフォー'),
+    "呼びかけ系": re.compile(r'あなた|みなさん|皆さん|君|お前|聞いて'),
+}
+
+
+def analyze_hook_strength(df):
+    """フック（冒頭1行）の強度分析"""
+    hook_data = []
+
+    for _, row in df.iterrows():
+        text = safe_get(row, "本文", "")
+        likes = safe_get(row, "いいね数", 0)
+        first_line = text.split("\n")[0] if text else ""
+
+        # パワーワード検出
+        found_words = []
+        for pw_type, pattern in POWER_WORDS.items():
+            if pattern.search(first_line):
+                found_words.append(pw_type)
+
+        hook_length = len(first_line)
+
+        hook_data.append({
+            "first_line": first_line[:80],
+            "likes": likes,
+            "power_words": found_words,
+            "power_word_count": len(found_words),
+            "hook_length": hook_length,
+        })
+
+    # パワーワード数別の平均いいね
+    pw_count_data = defaultdict(list)
+    for h in hook_data:
+        count = h["power_word_count"]
+        label = f"{count}個" if count <= 3 else "4個以上"
+        pw_count_data[label].append(h["likes"])
+
+    # パワーワード種類別の平均いいね
+    pw_type_data = defaultdict(list)
+    for h in hook_data:
+        for pw in h["power_words"]:
+            pw_type_data[pw].append(h["likes"])
+    # パワーワードなしも集計
+    no_pw = [h["likes"] for h in hook_data if h["power_word_count"] == 0]
+
+    # TOP10高パフォーマンスフック
+    top_hooks = sorted(hook_data, key=lambda x: x["likes"], reverse=True)[:10]
+
+    # フック文字数別
+    hook_len_data = defaultdict(list)
+    for h in hook_data:
+        ln = h["hook_length"]
+        if ln <= 15:
+            hook_len_data["〜15字"].append(h["likes"])
+        elif ln <= 30:
+            hook_len_data["16〜30字"].append(h["likes"])
+        elif ln <= 50:
+            hook_len_data["31〜50字"].append(h["likes"])
+        else:
+            hook_len_data["51字以上"].append(h["likes"])
+
+    return {
+        "pw_count_data": pw_count_data,
+        "pw_type_data": pw_type_data,
+        "no_pw_avg": sum(no_pw) / len(no_pw) if no_pw else 0,
+        "no_pw_count": len(no_pw),
+        "top_hooks": top_hooks,
+        "hook_len_data": hook_len_data,
+    }
+
+
+# === 新規分析関数: 議論誘発度分析 ===
+
+def analyze_discussion_inducement(df):
+    """議論誘発度分析（リプライ/いいね比率）"""
+    discussion_data = []
+
+    for _, row in df.iterrows():
+        likes = safe_get(row, "いいね数", 0)
+        replies = safe_get(row, "リプライ数", 0)
+        retweets = safe_get(row, "リポスト数", 0)
+        text = safe_get(row, "本文", "")
+
+        if likes > 0:
+            discussion_rate = replies / likes
+            discussion_data.append({
+                "text": text[:60],
+                "likes": likes,
+                "replies": replies,
+                "discussion_rate": discussion_rate,
+                "category": classify_category(text),
+                "user": safe_get(row, "ユーザー名", ""),
+            })
+
+    discussion_data.sort(key=lambda x: x["discussion_rate"], reverse=True)
+
+    # カテゴリ別議論誘発度
+    cat_discussion = defaultdict(list)
+    for d in discussion_data:
+        cat_discussion[d["category"]].append(d["discussion_rate"])
+
+    # 高議論 vs 低議論の特徴比較
+    median_rate = sorted([d["discussion_rate"] for d in discussion_data])[len(discussion_data) // 2] if discussion_data else 0
+
+    high_disc = [d for d in discussion_data if d["discussion_rate"] > median_rate]
+    low_disc = [d for d in discussion_data if d["discussion_rate"] <= median_rate]
+
+    # 高議論投稿のカテゴリ分布
+    high_cats = Counter(d["category"] for d in high_disc)
+    low_cats = Counter(d["category"] for d in low_disc)
+
+    # 冒頭パターン別
+    pattern_disc = defaultdict(list)
+    for d in discussion_data:
+        first_line = d["text"].split("\n")[0] if d["text"] else ""
+        pattern = classify_opening_pattern(first_line)
+        pattern_disc[pattern].append(d["discussion_rate"])
+
+    return {
+        "top10_discussion": discussion_data[:10],
+        "median_rate": median_rate,
+        "avg_rate": sum(d["discussion_rate"] for d in discussion_data) / len(discussion_data) if discussion_data else 0,
+        "cat_discussion": {k: sum(v) / len(v) if v else 0 for k, v in cat_discussion.items()},
+        "high_disc_cats": high_cats,
+        "low_disc_cats": low_cats,
+        "pattern_disc": {k: sum(v) / len(v) if v else 0 for k, v in pattern_disc.items()},
+    }
+
+
 def generate_report(df, output_filename, original_count, excluded_count, df_raw=None):
     """分析レポート生成"""
     print("\n分析を開始します...")
@@ -1134,6 +1456,25 @@ def generate_report(df, output_filename, original_count, excluded_count, df_raw=
                 f.write(f"| {i} | @{item['user']} | {item['likes']:,} | {item['rate']:.0f} | {item['text']}... |\n")
             f.write("\n")
 
+        # フォロワー帯別分析
+        print("フォロワー帯別分析中...")
+        tier_data = analyze_by_follower_tier(df)
+        if tier_data["has_data"]:
+            f.write("### フォロワー帯別分析（固定帯）\n\n")
+            f.write("| フォロワー帯 | 件数 | 平均いいね | エンゲージメント率 | 最強カテゴリ |\n")
+            f.write("|------------|------|-----------|-----------------|------------|\n")
+            for t in tier_data["tiers"]:
+                f.write(f"| {t['label']} | {t['count']}件 | {t['avg_likes']:.0f} | {t['avg_engagement_rate']:.1f}% | {t['best_category']} |\n")
+            f.write("\n")
+
+            if tier_data["auto_tiers"]:
+                f.write("### フォロワー帯別分析（自動四分位）\n\n")
+                f.write("| フォロワー帯 | 件数 | 平均いいね | エンゲージメント率 |\n")
+                f.write("|------------|------|-----------|------------------|\n")
+                for t in tier_data["auto_tiers"]:
+                    f.write(f"| {t['label']} | {t['count']}件 | {t['avg_likes']:.0f} | {t['avg_engagement_rate']:.1f}% |\n")
+                f.write("\n")
+
         # === セクション9: テキスト最適化分析 ===
         print("テキスト最適化を分析中...")
         f.write("## 9. テキスト最適化分析\n\n")
@@ -1288,6 +1629,152 @@ def generate_report(df, output_filename, original_count, excluded_count, df_raw=
                 f.write(f"| {freq_label} | {len(likes)}人 | {avg:.0f} |\n")
             f.write("\n")
 
+        # === セクション12: バイラル係数分析 ===
+        print("バイラル係数を分析中...")
+        f.write("## 12. バイラル係数分析\n\n")
+        f.write("RT/いいね比率で「拡散されやすさ」を数値化。いいねは多いけどRTされないポストと、少ないいいねでもめちゃくちゃRTされるポストの違いを分析します。\n\n")
+
+        viral_data = analyze_viral_coefficient(df)
+
+        f.write(f"- **全体の平均バイラル係数:** {viral_data['avg_coeff']:.3f}\n")
+        f.write(f"- **中央値:** {viral_data['median_coeff']:.3f}\n\n")
+
+        f.write("### 高バイラル vs 低バイラル\n\n")
+        f.write("| 区分 | 件数 | 平均いいね |\n")
+        f.write("|------|------|----------|\n")
+        f.write(f"| 高バイラル（中央値以上） | {viral_data['high_viral_traits']['count']}件 | {viral_data['high_viral_traits']['avg_likes']:.0f} |\n")
+        f.write(f"| 低バイラル（中央値未満） | {viral_data['low_viral_traits']['count']}件 | {viral_data['low_viral_traits']['avg_likes']:.0f} |\n")
+        f.write("\n")
+
+        f.write("### 拡散力TOP10\n\n")
+        f.write("| 順位 | ユーザー | いいね | RT | バイラル係数 | 本文 |\n")
+        f.write("|------|---------|-------|-----|-----------|------|\n")
+        for i, item in enumerate(viral_data["top10_viral"], 1):
+            f.write(f"| {i} | @{item['user']} | {item['likes']:,} | {item['retweets']:,} | {item['viral_coeff']:.3f} | {item['text']}... |\n")
+        f.write("\n")
+
+        f.write("### カテゴリ別バイラル係数\n\n")
+        f.write("| カテゴリ | 平均バイラル係数 |\n")
+        f.write("|---------|----------------|\n")
+        for cat, coeff in sorted(viral_data["cat_viral"].items(), key=lambda x: x[1], reverse=True):
+            f.write(f"| {cat} | {coeff:.3f} |\n")
+        f.write("\n")
+
+        f.write("### 冒頭パターン別バイラル係数\n\n")
+        f.write("| パターン | 平均バイラル係数 |\n")
+        f.write("|---------|----------------|\n")
+        for pat, coeff in sorted(viral_data["pattern_viral"].items(), key=lambda x: x[1], reverse=True):
+            f.write(f"| {pat} | {coeff:.3f} |\n")
+        f.write("\n")
+
+        # === セクション13: 競合ポジション分析 ===
+        print("競合ポジションを分析中...")
+        f.write("## 13. 競合ポジション分析\n\n")
+        f.write("カテゴリを「投稿数」×「平均いいね数」の四象限マトリクスで分類。狙い目のブルーオーシャン領域を特定します。\n\n")
+
+        comp_data = analyze_competitive_position(df)
+
+        f.write("### 四象限マトリクス\n\n")
+        f.write("| カテゴリ | 投稿数 | 平均いいね | ポジション |\n")
+        f.write("|---------|--------|-----------|----------|\n")
+        for pos in comp_data["positions"]:
+            f.write(f"| {pos['category']} | {pos['count']}件 | {pos['avg_likes']:.0f} | {pos['quadrant']} |\n")
+        f.write("\n")
+
+        # ポジション別の解説
+        blue_ocean = [p for p in comp_data["positions"] if "ブルーオーシャン" in p["quadrant"]]
+        red_ocean = [p for p in comp_data["positions"] if "レッドオーシャン" in p["quadrant"]]
+        if blue_ocean:
+            f.write("**狙い目カテゴリ（ブルーオーシャン）:**\n")
+            for p in blue_ocean:
+                f.write(f"- **{p['category']}** - 投稿数{p['count']}件で平均{p['avg_likes']:.0f}いいね。競合が少なく高リターン。\n")
+            f.write("\n")
+        if red_ocean:
+            f.write("**飽和カテゴリ（レッドオーシャン）:**\n")
+            for p in red_ocean:
+                f.write(f"- **{p['category']}** - 投稿数{p['count']}件で平均{p['avg_likes']:.0f}いいね。投稿は多いが伸びにくい。\n")
+            f.write("\n")
+
+        # === セクション14: フック強度分析 ===
+        print("フック強度を分析中...")
+        f.write("## 14. フック強度分析\n\n")
+        f.write("冒頭1行目（フック）のパワーワードの種類・数を分析。どんなフックが読者を止めるかを特定します。\n\n")
+
+        hook_data = analyze_hook_strength(df)
+
+        f.write("### パワーワード数別の効果\n\n")
+        f.write("| パワーワード数 | 件数 | 平均いいね |\n")
+        f.write("|--------------|------|----------|\n")
+        for label in ["0個", "1個", "2個", "3個", "4個以上"]:
+            likes = hook_data["pw_count_data"].get(label, [])
+            if likes:
+                avg = sum(likes) / len(likes)
+                f.write(f"| {label} | {len(likes)}件 | {avg:.0f} |\n")
+        f.write("\n")
+
+        f.write("### パワーワード種類別の効果\n\n")
+        f.write("| パワーワード種類 | 件数 | 平均いいね |\n")
+        f.write("|----------------|------|----------|\n")
+        pw_sorted = sorted(hook_data["pw_type_data"].items(), key=lambda x: sum(x[1]) / len(x[1]) if x[1] else 0, reverse=True)
+        for pw_type, likes in pw_sorted:
+            avg = sum(likes) / len(likes) if likes else 0
+            f.write(f"| {pw_type} | {len(likes)}件 | {avg:.0f} |\n")
+        f.write(f"| パワーワードなし | {hook_data['no_pw_count']}件 | {hook_data['no_pw_avg']:.0f} |\n")
+        f.write("\n")
+
+        f.write("### フック文字数別の効果\n\n")
+        f.write("| フック文字数 | 件数 | 平均いいね |\n")
+        f.write("|------------|------|----------|\n")
+        for label in ["〜15字", "16〜30字", "31〜50字", "51字以上"]:
+            likes = hook_data["hook_len_data"].get(label, [])
+            if likes:
+                avg = sum(likes) / len(likes)
+                f.write(f"| {label} | {len(likes)}件 | {avg:.0f} |\n")
+        f.write("\n")
+
+        f.write("### TOP10高パフォーマンスフック\n\n")
+        for i, h in enumerate(hook_data["top_hooks"], 1):
+            pw_str = ", ".join(h["power_words"]) if h["power_words"] else "なし"
+            f.write(f"{i}. **{h['likes']:,}いいね** [{pw_str}]\n")
+            f.write(f"   > {h['first_line']}\n\n")
+
+        # === セクション15: 議論誘発度分析 ===
+        print("議論誘発度を分析中...")
+        f.write("## 15. 議論誘発度分析\n\n")
+        f.write("リプライ/いいね比率で「議論・コメントを呼ぶ力」を分析。熱量のあるポストの特徴を特定します。\n\n")
+
+        disc_data = analyze_discussion_inducement(df)
+
+        f.write(f"- **全体の平均議論誘発度:** {disc_data['avg_rate']:.3f}\n")
+        f.write(f"- **中央値:** {disc_data['median_rate']:.3f}\n\n")
+
+        f.write("### 議論を呼ぶポストTOP10\n\n")
+        f.write("| 順位 | ユーザー | いいね | リプライ | 議論誘発度 | 本文 |\n")
+        f.write("|------|---------|-------|---------|-----------|------|\n")
+        for i, item in enumerate(disc_data["top10_discussion"], 1):
+            f.write(f"| {i} | @{item['user']} | {item['likes']:,} | {item['replies']} | {item['discussion_rate']:.3f} | {item['text']}... |\n")
+        f.write("\n")
+
+        f.write("### カテゴリ別議論誘発度\n\n")
+        f.write("| カテゴリ | 平均議論誘発度 |\n")
+        f.write("|---------|-------------|\n")
+        for cat, rate in sorted(disc_data["cat_discussion"].items(), key=lambda x: x[1], reverse=True):
+            f.write(f"| {cat} | {rate:.3f} |\n")
+        f.write("\n")
+
+        f.write("### 高議論ポストのカテゴリ分布\n\n")
+        if disc_data["high_disc_cats"]:
+            for cat, count in disc_data["high_disc_cats"].most_common():
+                f.write(f"- **{cat}:** {count}件\n")
+            f.write("\n")
+
+        f.write("### 冒頭パターン別議論誘発度\n\n")
+        f.write("| パターン | 平均議論誘発度 |\n")
+        f.write("|---------|-------------|\n")
+        for pat, rate in sorted(disc_data["pattern_disc"].items(), key=lambda x: x[1], reverse=True):
+            f.write(f"| {pat} | {rate:.3f} |\n")
+        f.write("\n")
+
         # === まとめ ===
         f.write("## まとめ\n\n")
         f.write("### バズる投稿の必須要素\n\n")
@@ -1305,7 +1792,7 @@ def generate_report(df, output_filename, original_count, excluded_count, df_raw=
         try:
             from generate_posts import generate_posts, format_posts_markdown
             posts, tools, works, ctas = generate_posts(df)
-            md = format_posts_markdown(posts, tools, works, ctas, section_num=12)
+            md = format_posts_markdown(posts, tools, works, ctas, section_num=16)
             f.write(md)
         except Exception as e:
             print(f"  投稿テンプレート生成をスキップ: {e}")
@@ -1316,7 +1803,7 @@ def generate_report(df, output_filename, original_count, excluded_count, df_raw=
             from visualize import generate_all_charts
             chart_dir = os.path.join(os.path.dirname(output_filename), "charts")
             chart_paths = generate_all_charts(df, chart_dir, df_raw=df_raw)
-            f.write("\n## 13. 可視化グラフ\n\n")
+            f.write("\n## 17. 可視化グラフ\n\n")
             f.write("以下のグラフが生成されました：\n\n")
             for name, path in chart_paths.items():
                 f.write(f"- **{name}**: `{path}`\n")
