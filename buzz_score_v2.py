@@ -407,35 +407,10 @@ def generate_report(df_buzz, df_self):
     lines.append("| **合計** | **100点** | |")
     lines.append("")
 
-    # === 以下、all_scores / corr 等は事前計算済み ===
-    for _, row in df_buzz.iterrows():
-        text = safe_get(row, "本文", "")
-        likes = safe_get(row, "いいね数", 0)
-        dt_str = safe_get(row, "投稿日時", "")
-        v1 = calculate_buzz_score(text)
-        v2 = calculate_buzz_score_v2(text, dt_str)
-        features = extract_features(text)
-        v1_scores.append({"text": text, "likes": likes, "v1": v1["total_score"], "v1_factors": v1["factors"]})
-        v2_scores.append({
-            "text": text, "likes": likes,
-            "v2": v2["total_score"], "v2_factors": v2["factors"],
-            "v1": v1["total_score"],
-            "features": features,
-        })
-
-    df_scores = pd.DataFrame([{"likes": s["likes"], "v1": s["v1"], "v2": s["v2"]} for s in v2_scores])
-    corr_v1 = float(df_scores["likes"].corr(df_scores["v1"]))
-    corr_v2 = float(df_scores["likes"].corr(df_scores["v2"]))
-
     lines.append("### 1.2 v1の致命的な問題")
     lines.append("")
     lines.append(f"**相関係数: {corr_v1:+.3f}（ほぼ無相関）**")
     lines.append("")
-
-    # TOP20 vs WORST20
-    sorted_by_likes = sorted(v2_scores, key=lambda x: x["likes"], reverse=True)
-    top20 = sorted_by_likes[:20]
-    worst20 = sorted_by_likes[-20:]
 
     avg_v1_top = sum(s["v1"] for s in top20) / 20
     avg_v1_worst = sum(s["v1"] for s in worst20) / 20
@@ -452,29 +427,29 @@ def generate_report(df_buzz, df_self):
     lines.append("|------|---------|---------|------|")
 
     # CTA
-    cta_yes = [s for s in v2_scores if s["features"]["has_cta"]]
-    cta_no = [s for s in v2_scores if not s["features"]["has_cta"]]
+    cta_yes = [s for s in all_scores if s["features"]["has_cta"]]
+    cta_no = [s for s in all_scores if not s["features"]["has_cta"]]
     avg_cta_yes = sum(s["likes"] for s in cta_yes) / len(cta_yes) if cta_yes else 0
     avg_cta_no = sum(s["likes"] for s in cta_no) / len(cta_no) if cta_no else 0
     lines.append(f"| CTA (+10点) | CTA有 → バズる | CTAあり平均{avg_cta_yes:.0f} vs なし{avg_cta_no:.0f} | **CTAなしの方が高い** |")
 
     # 感情トリガー
-    emo0 = [s for s in v2_scores if s["features"]["emotion_count"] == 0]
-    emo1 = [s for s in v2_scores if s["features"]["emotion_count"] >= 1]
+    emo0 = [s for s in all_scores if s["features"]["emotion_count"] == 0]
+    emo1 = [s for s in all_scores if s["features"]["emotion_count"] >= 1]
     avg_emo0 = sum(s["likes"] for s in emo0) / len(emo0) if emo0 else 0
     avg_emo1 = sum(s["likes"] for s in emo1) / len(emo1) if emo1 else 0
     lines.append(f"| 感情トリガー (+10点) | 感情多 → バズる | 0種{avg_emo0:.0f} vs 1種以上{avg_emo1:.0f} | **感情なしの方が高い** |")
 
     # 絵文字
-    emoji0 = [s for s in v2_scores if s["features"]["emoji_count"] == 0]
-    emoji_some = [s for s in v2_scores if s["features"]["emoji_count"] >= 1]
+    emoji0 = [s for s in all_scores if s["features"]["emoji_count"] == 0]
+    emoji_some = [s for s in all_scores if s["features"]["emoji_count"] >= 1]
     avg_emoji0 = sum(s["likes"] for s in emoji0) / len(emoji0) if emoji0 else 0
     avg_emoji_some = sum(s["likes"] for s in emoji_some) / len(emoji_some) if emoji_some else 0
     lines.append(f"| 絵文字 (0個=4点, 1-3個=10点) | 絵文字あり → バズる | 0個{avg_emoji0:.0f} vs 1個以上{avg_emoji_some:.0f} | **絵文字なしの方が高い** |")
 
     # テキスト長
-    short = [s for s in v2_scores if len(s["text"]) <= 170]
-    long_text = [s for s in v2_scores if len(s["text"]) > 300]
+    short = [s for s in all_scores if len(s["text"]) <= 170]
+    long_text = [s for s in all_scores if len(s["text"]) > 300]
     avg_short = sum(s["likes"] for s in short) / len(short) if short else 0
     avg_long = sum(s["likes"] for s in long_text) / len(long_text) if long_text else 0
     lines.append(f"| テキスト最適化 (100-300字) | 100-300字 → 満点 | 170字以下{avg_short:.0f} vs 300字超{avg_long:.0f} | **短い方が圧倒的に高い** |")
@@ -519,7 +494,7 @@ def generate_report(df_buzz, df_self):
     lines.append("**カテゴリ別平均いいね数（データ根拠）:**")
     lines.append("")
     cat_data = defaultdict(list)
-    for s in v2_scores:
+    for s in all_scores:
         cat_data[s["features"]["category"]].append(s["likes"])
     lines.append("| カテゴリ | 平均いいね | 件数 | v1配点 | v2配点 |")
     lines.append("|---------|----------|------|--------|--------|")
@@ -534,7 +509,7 @@ def generate_report(df_buzz, df_self):
     lines.append("**冒頭パターン別平均いいね数（データ根拠）:**")
     lines.append("")
     pat_data = defaultdict(list)
-    for s in v2_scores:
+    for s in all_scores:
         pat_data[s["features"]["opening_pattern"]].append(s["likes"])
     lines.append("| パターン | 平均いいね | 件数 | v1配点 | v2配点 |")
     lines.append("|---------|----------|------|--------|--------|")
@@ -552,7 +527,7 @@ def generate_report(df_buzz, df_self):
     lines.append("|---------|----------|------|--------|")
     bins = [(0, 80, 20), (81, 130, 13), (131, 170, 17), (171, 220, 10), (221, 300, 4), (301, 999, 2)]
     for lo, hi, pts in bins:
-        subset = [s for s in v2_scores if lo <= len(s["text"]) <= hi]
+        subset = [s for s in all_scores if lo <= len(s["text"]) <= hi]
         if subset:
             avg = sum(s["likes"] for s in subset) / len(subset)
             label = f"{lo}-{hi}字" if hi < 999 else f"{lo}字以上"
@@ -645,7 +620,7 @@ def generate_report(df_buzz, df_self):
     lines.append("| スコア帯 | 件数 | 平均いいね | 中央値 |")
     lines.append("|---------|------|----------|--------|")
     buckets = {"80-100点": [], "60-79点": [], "40-59点": [], "0-39点": []}
-    for s in v2_scores:
+    for s in all_scores:
         sc = s["v2"]
         if sc >= 80:
             buckets["80-100点"].append(s["likes"])
@@ -672,7 +647,7 @@ def generate_report(df_buzz, df_self):
         "具体的数字": 15, "簡潔さ": 10, "絵文字": 10, "ストーリー性": 5,
     }
     factor_totals = defaultdict(list)
-    for s in v2_scores:
+    for s in all_scores:
         for k, v in s["v2_factors"].items():
             if not k.startswith("_"):
                 factor_totals[k].append(v)
@@ -693,13 +668,13 @@ def generate_report(df_buzz, df_self):
     lines.append("## 5. v2スコアの乖離投稿分析")
     lines.append("")
 
-    sorted_by_v2 = sorted(v2_scores, key=lambda x: x["v2"], reverse=True)
-    median_likes = sorted([s["likes"] for s in v2_scores])[len(v2_scores) // 2]
-    score_75 = sorted([s["v2"] for s in v2_scores])[int(len(v2_scores) * 0.75)]
-    score_25 = sorted([s["v2"] for s in v2_scores])[int(len(v2_scores) * 0.25)]
+    sorted_by_v2 = sorted(all_scores, key=lambda x: x["v2"], reverse=True)
+    median_likes = sorted([s["likes"] for s in all_scores])[len(all_scores) // 2]
+    score_75 = sorted([s["v2"] for s in all_scores])[int(len(all_scores) * 0.75)]
+    score_25 = sorted([s["v2"] for s in all_scores])[int(len(all_scores) * 0.25)]
 
     # 高スコア×低いいね
-    high_low = [s for s in v2_scores if s["v2"] >= score_75 and s["likes"] <= median_likes]
+    high_low = [s for s in all_scores if s["v2"] >= score_75 and s["likes"] <= median_likes]
     high_low.sort(key=lambda x: x["likes"])
 
     lines.append(f"### 5.1 高スコアなのにバズってない投稿（v2≥{score_75}点 & いいね≤{median_likes}）")
@@ -718,7 +693,7 @@ def generate_report(df_buzz, df_self):
     lines.append("")
 
     # 低スコア×高いいね
-    low_high = [s for s in v2_scores if s["v2"] <= score_25 and s["likes"] >= median_likes]
+    low_high = [s for s in all_scores if s["v2"] <= score_25 and s["likes"] >= median_likes]
     low_high.sort(key=lambda x: x["likes"], reverse=True)
 
     lines.append(f"### 5.2 低スコアなのにバズった投稿（v2≤{score_25}点 & いいね≥{median_likes}）")
@@ -781,8 +756,8 @@ def generate_report(df_buzz, df_self):
 
         avg_self_v1 = sum(s["v1"] for s in self_scores) / len(self_scores)
         avg_self_v2 = sum(s["v2"] for s in self_scores) / len(self_scores)
-        avg_buzz_v1 = sum(s["v1"] for s in v2_scores) / len(v2_scores)
-        avg_buzz_v2 = sum(s["v2"] for s in v2_scores) / len(v2_scores)
+        avg_buzz_v1 = sum(s["v1"] for s in all_scores) / len(all_scores)
+        avg_buzz_v2 = sum(s["v2"] for s in all_scores) / len(all_scores)
 
         lines.append(f"| | 自分の平均 | バズ投稿平均 | 差 |")
         lines.append(f"|---|----------|------------|-----|")
@@ -801,7 +776,7 @@ def generate_report(df_buzz, df_self):
             for k, v in s["v2_factors"].items():
                 if not k.startswith("_"):
                     self_factor_avg[k].append(v)
-        for s in v2_scores:
+        for s in all_scores:
             for k, v in s["v2_factors"].items():
                 if not k.startswith("_"):
                     buzz_factor_avg[k].append(v)
