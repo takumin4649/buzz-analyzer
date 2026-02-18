@@ -310,8 +310,12 @@ def extract_features(text):
 def load_self_posts(filepath):
     """自分の投稿CSVを読み込む"""
     df = pd.read_csv(filepath, encoding="utf-8-sig")
+    # TwExportのCSV列名をコード内の統一名称に変換
+    rename_map = {"テキスト": "本文", "RT数": "リポスト数"}
+    df = df.rename(columns={k: v for k, v in rename_map.items() if k in df.columns})
     for col in ["いいね数", "リポスト数", "リプライ数", "フォロワー数"]:
-        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0).astype(int)
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0).astype(int)
     return df
 
 
