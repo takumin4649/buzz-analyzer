@@ -35,6 +35,33 @@ def filter_keywords(df):
     return df[~df["本文"].apply(should_exclude)].copy()
 
 
+# プレゼント企画・業者系投稿の除外キーワード
+GIVEAWAY_KEYWORDS = [
+    "いいねしたら",
+    "フォロー&RT",
+    "RT&フォロー",
+    "プレゼント企画",
+    "抽選で",
+    "配布します",
+    "全員に配",
+    "リプで送ります",
+]
+
+
+def filter_giveaway(df):
+    """プレゼント企画・業者系投稿を除外する"""
+    def is_giveaway(text):
+        for keyword in GIVEAWAY_KEYWORDS:
+            if keyword in str(text):
+                return True
+        return False
+
+    mask = df["本文"].apply(is_giveaway)
+    excluded = df[mask].copy()
+    filtered = df[~mask].copy()
+    return filtered, excluded
+
+
 def filter_data(df):
     """データをフィルタリング"""
     original_count = len(df)
@@ -44,10 +71,15 @@ def filter_data(df):
     excluded_by_keyword = original_count - len(df_filtered)
     print(f"炎上系・著作権問題系を除外: {excluded_by_keyword}件")
 
-    # 2. 同一ユーザーの投稿は最もいいね数が高い1件のみ残す
+    # 2. プレゼント企画・業者系を除外
+    df_filtered, _ = filter_giveaway(df_filtered)
+    excluded_by_giveaway = original_count - excluded_by_keyword - len(df_filtered)
+    print(f"プレゼント企画・業者系を除外: {excluded_by_giveaway}件")
+
+    # 3. 同一ユーザーの投稿は最もいいね数が高い1件のみ残す
     df_filtered = df_filtered.sort_values("いいね数", ascending=False)
     df_filtered = df_filtered.drop_duplicates(subset=["ユーザー名"], keep="first")
-    excluded_by_user = len(df) - excluded_by_keyword - len(df_filtered)
+    excluded_by_user = original_count - excluded_by_keyword - excluded_by_giveaway - len(df_filtered)
     print(f"同一ユーザーの重複投稿を除外: {excluded_by_user}件")
 
     total_excluded = original_count - len(df_filtered)
