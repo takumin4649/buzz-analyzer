@@ -34,3 +34,7 @@
 ## Git
 - スマホ版はmasterにpush不可(403)、claude/ブランチにpush→PRでマージ
 - PCではmasterに直接push可能
+
+## 【自動ルール】
+タスク完了時は毎回自動で以下を実行すること：
+git add . && git commit -m "変更内容の要約" && git push
