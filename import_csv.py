@@ -45,7 +45,19 @@ def init_db():
             feature TEXT,
             weight  REAL
         );
+
+        CREATE TABLE IF NOT EXISTS account_followers (
+            account  TEXT PRIMARY KEY,
+            followers INTEGER DEFAULT 0,
+            updated_at TEXT
+        );
     """)
+    # postsテーブルにfollower_count列がなければ追加（マイグレーション）
+    try:
+        conn.execute("ALTER TABLE posts ADD COLUMN follower_count INTEGER DEFAULT 0")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass  # 既に存在する場合は無視
     conn.commit()
     conn.close()
 
@@ -156,17 +168,17 @@ def import_file(filepath):
     if filtered_out > 0:
         print(f"プレゼント企画・業者系を除外: {filtered_out}件")
 
-    # DBへ挿入（重複チェック: 同一text + 同一account）
+    # DBへ挿入（重複チェック: 同一アカウント + テキスト全文一致）
     conn = sqlite3.connect(DB_PATH)
     inserted = 0
-    skipped = 0
+    skipped_rows = []
     for row in rows:
         exists = conn.execute(
-            "SELECT id FROM posts WHERE text = ? AND account = ?",
-            (row["text"], row["account"])
+            "SELECT id FROM posts WHERE account = ? AND text = ?",
+            (row["account"], row["text"])
         ).fetchone()
         if exists:
-            skipped += 1
+            skipped_rows.append(row)
             continue
         conn.execute("""
             INSERT INTO posts
@@ -180,9 +192,10 @@ def import_file(filepath):
     total = conn.execute("SELECT COUNT(*) FROM posts").fetchone()[0]
     conn.close()
 
+    skipped = len(skipped_rows)
     print(f"新規登録: {inserted}件 / スキップ（重複）: {skipped}件")
     print(f"DB合計: {total}件")
-    return inserted, skipped
+    return inserted, skipped_rows
 
 
 if __name__ == "__main__":

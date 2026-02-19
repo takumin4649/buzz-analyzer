@@ -6,7 +6,19 @@
       "Bash(git commit:*)",
       "Bash(git push:*)",
       "Bash(git pull:*)",
-      "Bash(python:*)"
+      "Bash(python:*)",
+      "Bash(PYTHONIOENCODING=utf-8 python:*)",
+      "Bash(git checkout:*)",
+      "Bash(git branch:*)",
+      "Bash(pip install:*)",
+      "Bash(PYTHONIOENCODING=utf-8 pip install:*)",
+      "Bash(powershell -WindowStyle Hidden -NonInteractive -File \"$USERPROFILE/.claude/hooks/notify-done.ps1\")",
+      "Bash(echo:*)",
+      "Bash(powershell -ExecutionPolicy Bypass -WindowStyle Hidden -File \"$USERPROFILE/.claude/hooks/notify-done.ps1\")",
+      "Bash(powershell -ExecutionPolicy Bypass -File:*)",
+      "Bash(netstat:*)",
+      "Bash(ss:*)",
+      "Bash(powershell -Command \"netstat -ano | Select-String ''850''\")"
     ]
   }
 }
