@@ -24,6 +24,7 @@ from analyze_posts import (
 
 BUZZ_FILE = "output/buzz_posts_20260215.xlsx"
 SELF_FILE = "output/TwExport_20260217_191942.csv"
+DB_FILE = "data/buzz_database.db"
 OUTPUT_FILE = "output/buzz_score_v2_20260217.md"
 
 
@@ -115,14 +116,12 @@ def calculate_buzz_score_v2_0(text, post_datetime=None):
 def calculate_buzz_score_v2(text, post_datetime=None):
     """データ駆動型バズ予測スコアv2（0-100点）
 
-    v2.0からの改善点:
-    - 冒頭一人称（+0.323相関）を新要素として追加
-    - 権威/ツール言及（TOP20=45%, WORST20=15%）を追加
-    - 文字数×具体的数字の交互作用ボーナスを追加（+0.415相関）
-    - n=1カテゴリ（問題提起系）の配点を調整（過学習リスク軽減）
-    - ストーリー性を削除（+0.054と弱すぎる＆TOP20で低い）
-    - 対比構造（→）のペナルティを追加（-0.187相関）
-    - 過学習チェック済み: ランダム半分分割×20回で安定（std=0.127）
+    6240件のデータで再最適化。76件版からの主な変更:
+    - 文字数: 長文の方がバズる（301+字が中央値59で最高）
+    - 冒頭パターン: 煽りが最強（中央値74）
+    - CTA: ありの方がバズる（中央値49 vs 33）→復活
+    - 絵文字: 多い方がやや有利→ペナルティ廃止
+    - パワーワード: r=+0.070の正の相関→新規追加
     """
     factors = {}
     total = 0
@@ -130,52 +129,77 @@ def calculate_buzz_score_v2(text, post_datetime=None):
     first_line = text.split("\n")[0] if text else ""
     length = len(text)
 
-    # 1. 冒頭パターン (20点) - 数字提示が圧倒的（平均806いいね）
+    # 1. 冒頭パターン (20点) - 中央値ベース
     pattern = classify_opening_pattern(first_line)
     pattern_scores = {
-        "数字提示": 20,  # 平均806いいね
-        "共感": 15,      # 平均518いいね
-        "疑問形": 10,    # 平均344いいね
-        "その他": 8,     # 平均297いいね
-        "断定形": 6,     # 平均267いいね
-        "煽り": 5,
-        "呼びかけ": 4,
+        "煽り": 20,      # 中央値74, 平均156 (n=238)
+        "疑問形": 16,    # 中央値45, 平均95 (n=1381)
+        "共感": 13,      # 中央値36, 平均65 (n=226)
+        "その他": 13,    # 中央値36, 平均79 (n=2584)
+        "数字提示": 11,  # 中央値32, 平均109 (n=529) ※平均は高いが中央値低い
+        "断定形": 7,     # 中央値21, 平均41 (n=1238)
+        "呼びかけ": 5,   # 中央値18, 平均34 (n=44)
     }
-    s = pattern_scores.get(pattern, 8)
+    s = pattern_scores.get(pattern, 13)
     factors["冒頭パターン"] = s
     total += s
 
-    # 2. 文字数 (15点) - 短い方がバズる
-    if length <= 80:
-        s = 15       # 平均630いいね (n=6)
-    elif length <= 130:
-        s = 10       # 平均283いいね (n=17)
-    elif length <= 170:
-        s = 13       # 平均413いいね (n=24, 最大サンプル)
-    elif length <= 220:
-        s = 7        # 平均300いいね (n=13)
-    elif length <= 300:
-        s = 3        # 平均136いいね (n=4)
+    # 2. 文字数 (20点) - 長い方がバズる（76件分析とは逆）
+    if length >= 301:
+        s = 20       # 中央値59 (n=1129)
+    elif length >= 221:
+        s = 16       # 中央値45 (n=530)
+    elif length >= 171:
+        s = 16       # 中央値48 (n=538)
+    elif length >= 131:
+        s = 11       # 中央値34 (n=1432)
+    elif length >= 81:
+        s = 6        # 中央値23 (n=1648)
     else:
-        s = 1        # 301字以上 (n=10)
+        s = 4        # 中央値27 (n=963) ※81-130より高いが短文は不安定
     factors["文字数"] = s
     total += s
 
-    # 3. 具体的数字 (15点) - 最強の正の相関 (+0.225)
+    # 3. カテゴリ (15点) - 問題提起系がn=220で信頼性あり
+    category = classify_category(text)
+    cat_scores = {
+        "問題提起系": 15,    # 中央値48, 平均153 (n=220)
+        "ノウハウ系": 12,    # 中央値40, 平均102 (n=533)
+        "ツール紹介系": 11,  # 中央値38, 平均95 (n=1905)
+        "実績報告系": 10,    # 中央値37, 平均68 (n=1203)
+        "ニュース系": 10,    # 中央値34, 平均63 (n=76)
+        "体験談系": 9,       # 中央値31, 平均74 (n=445)
+        "その他": 7,         # 中央値29, 平均60 (n=1858)
+    }
+    s = cat_scores.get(category, 7)
+    factors["カテゴリ"] = s
+    total += s
+
+    # 4. 具体的数字 (12点) - あり平均97 vs なし65、中央値40 vs 32
     has_numbers = bool(re.search(
         r'[0-9０-９]+[万円個件つ選ステップヶ月日時間分秒%％倍]', text
     ))
     has_money = bool(re.search(r'[0-9０-９]+万|[0-9０-９]+円|月収|年収|売上', text))
     s = 0
     if has_numbers:
-        s += 10
+        s += 8
     if has_money:
-        s += 5
-    s = min(15, s)
+        s += 4
+    s = min(12, s)
     factors["具体的数字"] = s
     total += s
 
-    # 4. 権威/ツール言及 (10点) - TOP20=45% vs WORST20=15%
+    # 5. CTA (10点) - あり中央値49 vs なし33 ★76件分析から逆転・復活
+    cta_patterns = re.compile(
+        r'フォロー|いいね|リプ|RT|リツイート|保存|ブクマ|DMで|コメント|シェア|拡散',
+        re.IGNORECASE
+    )
+    has_cta = bool(cta_patterns.search(text))
+    s = 10 if has_cta else 0
+    factors["CTA"] = s
+    total += s
+
+    # 6. 権威/ツール言及 (8点) - AI界隈のバズワード
     has_authority = bool(re.search(
         r'マイクロソフト|Microsoft|Google|OpenAI|Claude|GPT|Apple|Amazon|Anthropic|Meta|イーロン',
         text, re.IGNORECASE
@@ -186,75 +210,46 @@ def calculate_buzz_score_v2(text, post_datetime=None):
     ))
     s = 0
     if has_authority:
-        s += 5
+        s += 4
     if has_tool:
-        s += 5
-    s = min(10, s)
+        s += 4
+    s = min(8, s)
     factors["権威/ツール"] = s
     total += s
 
-    # 5. カテゴリ (10点) - n=1の問題提起系は控えめに
-    category = classify_category(text)
-    cat_scores = {
-        "体験談系": 10,      # 平均558いいね (n=8)
-        "問題提起系": 8,     # 平均551いいね (n=1, 信頼性低)
-        "ツール紹介系": 7,   # 平均348いいね (n=41, 最大)
-        "ノウハウ系": 5,     # 平均289いいね (n=3)
-        "実績報告系": 4,     # 平均254いいね (n=22)
-        "その他": 3,
-    }
-    s = cat_scores.get(category, 3)
-    factors["カテゴリ"] = s
-    total += s
-
-    # 6. 簡潔さ (10点) - 改行少ない方がバズる（相関-0.177）
-    line_breaks = text.count("\n")
-    if line_breaks <= 3:
-        s = 10
-    elif line_breaks <= 7:
-        s = 7
-    elif line_breaks <= 12:
-        s = 4
-    else:
-        s = 1
-    factors["簡潔さ"] = s
-    total += s
-
-    # 7. 冒頭一人称 (8点) ★新規 - 最強の単体相関（+0.323）
-    # 「私が大学生だったら」（2135いいね, TOP1）等の等身大スタイル
-    has_first_person = bool(re.search(r'^(私[がはもの]|僕[がはもの]|俺[がはもの])', text))
-    s = 8 if has_first_person else 0
-    factors["冒頭一人称"] = s
-    total += s
-
-    # 8. 絵文字 (5点) - 少ない方がバズる（相関-0.142）
-    emoji_count = len(EMOJI_PATTERN.findall(text))
-    if emoji_count == 0:
+    # 7. パワーワード (8点) ★新規 - r=+0.070、TOP20%平均2.4 vs BOT20%平均1.7
+    pw_count = sum(1 for w in POWER_WORDS if w in text)
+    if pw_count >= 3:
+        s = 8
+    elif pw_count >= 2:
         s = 5
-    elif emoji_count <= 2:
+    elif pw_count >= 1:
         s = 3
     else:
         s = 0
-    factors["絵文字"] = s
+    factors["パワーワード"] = s
     total += s
 
-    # 9. 交互作用ボーナス (5点) ★新規 - 短文×数字（+0.415相関）
-    short_with_numbers = (length <= 170 and has_numbers)
-    s = 5 if short_with_numbers else 0
-    factors["短文×数字"] = s
+    # 8. 秘匿感/感情 (5点) - r=+0.045、あった方がやや有利
+    emotion_count = sum(1 for p in [
+        r'衝撃|驚[いき]|ヤバ[いすくっ]|やば[いすくっ]|マジで|ガチで|震え[たるる]',
+        r'後悔|損[しす]|失敗|取り返し|手遅れ',
+        r'最強|神|革命|破壊力|圧倒的|異次元|チート',
+        r'禁止|秘密|内緒|こっそり|裏技|非公開|限定',
+    ] if re.search(p, text))
+    secret_count = len(re.findall(
+        r'こっそり|内緒|ここだけ|誰にも|秘密|知らない人多い|意外と知られ|実は',
+        text
+    ))
+    s = min(5, emotion_count + secret_count)
+    factors["感情/秘匿"] = s
     total += s
 
-    # 10. 対比構造ペナルティ (最大-3点) ★新規 - 負の相関（-0.187）
-    # 「→」多用は情報詰め込みすぎの指標
-    arrow_count = len(re.findall(r'→|⇒', text))
-    if arrow_count >= 3:
-        penalty = -3
-    elif arrow_count >= 1:
-        penalty = -1
-    else:
-        penalty = 0
-    factors["対比構造"] = penalty
-    total += penalty
+    # 9. 冒頭一人称 (2点) - 等身大スタイル（6240件では弱め）
+    has_first_person = bool(re.search(r'^(私[がはもの]|僕[がはもの]|俺[がはもの])', text))
+    s = 2 if has_first_person else 0
+    factors["冒頭一人称"] = s
+    total += s
 
     # 下限0
     total = max(0, total)
@@ -305,6 +300,29 @@ def extract_features(text):
         "emotion_count": emotion_count,
         "secret_count": secret_count,
     }
+
+
+def load_from_db(db_path):
+    """SQLiteデータベースから全投稿を読み込み、analyze_posts互換のDataFrameを返す"""
+    import sqlite3
+    conn = sqlite3.connect(db_path)
+    df = pd.read_sql_query("SELECT * FROM posts", conn)
+    conn.close()
+    # カラム名をanalyze_posts互換に変換
+    rename_map = {
+        "text": "本文",
+        "likes": "いいね数",
+        "retweets": "リポスト数",
+        "replies": "リプライ数",
+        "date": "投稿日時",
+        "account": "ユーザー名",
+        "follower_count": "フォロワー数",
+    }
+    df = df.rename(columns=rename_map)
+    for col in ["いいね数", "リポスト数", "リプライ数", "フォロワー数"]:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0).astype(int)
+    return df
 
 
 def load_self_posts(filepath):
@@ -529,7 +547,7 @@ def generate_report(df_buzz, df_self):
     lines.append("")
     lines.append("| 文字数帯 | 平均いいね | 件数 | v2配点 |")
     lines.append("|---------|----------|------|--------|")
-    bins = [(0, 80, 20), (81, 130, 13), (131, 170, 17), (171, 220, 10), (221, 300, 4), (301, 999, 2)]
+    bins = [(0, 80, 4), (81, 130, 6), (131, 170, 11), (171, 220, 16), (221, 300, 16), (301, 999, 20)]
     for lo, hi, pts in bins:
         subset = [s for s in all_scores if lo <= len(s["text"]) <= hi]
         if subset:
@@ -543,46 +561,54 @@ def generate_report(df_buzz, df_self):
     lines.append("")
     lines.append("## 3. 新スコア（v2）の設計")
     lines.append("")
-    lines.append("### 3.1 v1 → v2 変更サマリ")
+    lines.append("### 3.1 v1 → v2 変更サマリ（6240件データ駆動）")
     lines.append("")
     lines.append("| 要素 | v1 | v2 | 変更理由 |")
     lines.append("|------|-----|-----|---------|")
-    lines.append("| 冒頭パターン | 20点 | **25点** | 数字提示の影響力が最大。配点増 |")
-    lines.append("| 文字数 | 15点（100-300字） | **20点（0-170字）** | 短い投稿が圧倒的にバズる |")
-    lines.append("| カテゴリ | 15点（実績報告最高） | **15点（体験談最高）** | データ駆動で順位逆転 |")
-    lines.append("| 具体的数字 | なし | **15点（新規）** | 唯一の正の相関(+0.225) |")
-    lines.append("| 簡潔さ | なし | **10点（新規）** | 改行少ない方がバズる(-0.177) |")
-    lines.append("| 絵文字 | 10点（1-3個最高） | **10点（0個最高）** | 絵文字なしが最もバズる |")
-    lines.append("| ストーリー性 | 10点 | **5点** | 弱い正の相関、配点縮小 |")
-    lines.append("| 感情トリガー | 10点 | **削除** | 感情多いほどバズらない |")
-    lines.append("| CTA | 10点 | **削除** | CTAなしの方がバズる |")
-    lines.append("| 読みやすさ | 10点 | **→簡潔さに統合** | 箇条書き・改行多い=逆効果 |")
+    lines.append("| 冒頭パターン | 20点 | **20点** | 煽りが最強（中央値74）。76件版の数字提示最強から逆転 |")
+    lines.append("| 文字数 | 15点（100-300字） | **20点（301字+最高）** | 長文がバズる（76件版とは逆） |")
+    lines.append("| カテゴリ | 15点（実績報告最高） | **15点（問題提起最高）** | n=220で信頼性あり |")
+    lines.append("| 具体的数字 | なし | **12点** | 平均97 vs 65。中央値40 vs 32 |")
+    lines.append("| CTA | 10点 | **10点** | ★復活: 中央値49 vs 33（76件版では逆効果だった） |")
+    lines.append("| 権威/ツール | なし | **8点** | AI系バズワードの効果 |")
+    lines.append("| パワーワード | なし | **8点（新規）** | r=+0.070、TOP20%平均2.4 vs BOT20%平均1.7 |")
+    lines.append("| 感情/秘匿 | 10点 | **5点** | 弱い正の相関（r=+0.045） |")
+    lines.append("| 冒頭一人称 | なし | **2点** | 等身大スタイル（6240件では弱め） |")
+    lines.append("| 絵文字 | 10点 | **削除** | 76件では逆効果だったが6240件では差なし |")
+    lines.append("| 簡潔さ | なし | **削除** | 6240件では改行数に差なし |")
+    lines.append("| ストーリー性 | 10点 | **削除** | 効果が不安定 |")
     lines.append("| **合計** | **100点** | **100点** | |")
     lines.append("")
 
     lines.append("### 3.2 v2スコア詳細ロジック")
     lines.append("")
     lines.append("```")
-    lines.append("1. 冒頭パターン (25点)")
-    lines.append("   数字提示=25 / 共感=18 / 疑問形=12 / その他=10 / 断定形=8 / 煽り=6 / 呼びかけ=5")
+    lines.append("1. 冒頭パターン (20点)")
+    lines.append("   煽り=20 / 疑問形=16 / 共感=13 / その他=13 / 数字提示=11 / 断定形=7 / 呼びかけ=5")
     lines.append("")
     lines.append("2. 文字数 (20点)")
-    lines.append("   0-80字=20 / 131-170字=17 / 81-130字=13 / 171-220字=10 / 221-300字=4 / 301字+=2")
+    lines.append("   301字+=20 / 221-300字=16 / 171-220字=16 / 131-170字=11 / 81-130字=6 / 0-80字=4")
     lines.append("")
     lines.append("3. カテゴリ (15点)")
-    lines.append("   体験談系=15 / 問題提起系=15 / ツール紹介系=10 / ノウハウ系=8 / 実績報告系=7 / その他=5")
+    lines.append("   問題提起系=15 / ノウハウ系=12 / ツール紹介系=11 / 実績報告系=10 / ニュース系=10 / 体験談系=9 / その他=7")
     lines.append("")
-    lines.append("4. 具体的数字 (15点) ★新規")
-    lines.append("   数字+単位あり=10 / 金額表現あり=+5 / なし=0")
+    lines.append("4. 具体的数字 (12点)")
+    lines.append("   数字+単位あり=8 / 金額表現あり=+4 / なし=0")
     lines.append("")
-    lines.append("5. 簡潔さ (10点) ★新規")
-    lines.append("   改行0-3=10 / 4-7=7 / 8-12=4 / 13+=1")
+    lines.append("5. CTA (10点) ★復活")
+    lines.append("   CTA有=10 / なし=0")
     lines.append("")
-    lines.append("6. 絵文字 (10点) ★逆転")
-    lines.append("   0個=10 / 1-2個=6 / 3個+=2")
+    lines.append("6. 権威/ツール言及 (8点)")
+    lines.append("   企業名/人名=4 / ツール名=4")
     lines.append("")
-    lines.append("7. ストーリー性 (5点)")
-    lines.append("   あり=5 / なし=0")
+    lines.append("7. パワーワード (8点) ★新規")
+    lines.append("   3個+=8 / 2個=5 / 1個=3 / 0個=0")
+    lines.append("")
+    lines.append("8. 感情/秘匿 (5点)")
+    lines.append("   感情+秘匿フレーズ数（上限5）")
+    lines.append("")
+    lines.append("9. 冒頭一人称 (2点)")
+    lines.append("   あり=2 / なし=0")
     lines.append("```")
     lines.append("")
 
@@ -869,20 +895,39 @@ def main():
     print("バズ予測スコアv2 改善分析")
     print("=" * 60)
 
-    if not os.path.exists(BUZZ_FILE):
-        print(f"エラー: {BUZZ_FILE} が見つかりません")
+    # データ読み込み: DB優先、なければExcel
+    if os.path.exists(DB_FILE):
+        print(f"データベースから読み込み: {DB_FILE}")
+        df_raw = load_from_db(DB_FILE)
+        print(f"読み込み完了: {len(df_raw)}件のポスト")
+        # DBの場合はfilter_dataを使わず、自分の投稿を分離
+        self_accounts = {"Mr_boten", "mr_boten"}
+        df_self_from_db = df_raw[df_raw["ユーザー名"].str.lower().isin({a.lower() for a in self_accounts})]
+        df_others = df_raw[~df_raw["ユーザー名"].str.lower().isin({a.lower() for a in self_accounts})]
+        # いいね0以下を除外
+        df_buzz = df_others[df_others["いいね数"] > 0].copy()
+        original_count = len(df_raw)
+        excluded_count = original_count - len(df_buzz) - len(df_self_from_db)
+        print(f"バズ投稿（いいね>0）: {len(df_buzz)}件 / 自分の投稿: {len(df_self_from_db)}件 / 除外: {excluded_count}件")
+    elif os.path.exists(BUZZ_FILE):
+        print(f"Excelから読み込み: {BUZZ_FILE}")
+        df_raw = load_excel(BUZZ_FILE)
+        if df_raw is None:
+            return
+        df_buzz, original_count, excluded_count = filter_data(df_raw)
+        df_self_from_db = pd.DataFrame()
+    else:
+        print(f"エラー: {DB_FILE} も {BUZZ_FILE} も見つかりません")
         return
 
-    df_raw = load_excel(BUZZ_FILE)
-    if df_raw is None:
-        return
-
-    df_buzz, original_count, excluded_count = filter_data(df_raw)
-
-    if os.path.exists(SELF_FILE):
+    # 自分の投稿: DBから分離済みがあればそちら、なければCSV
+    if len(df_self_from_db) > 0:
+        df_self = df_self_from_db
+        print(f"自分の投稿: DBから{len(df_self)}件取得")
+    elif os.path.exists(SELF_FILE):
         df_self = load_self_posts(SELF_FILE)
     else:
-        print(f"注意: {SELF_FILE} が見つかりません。自分の投稿スコアリングはスキップします。")
+        print(f"注意: 自分の投稿が見つかりません。スコアリングはスキップします。")
         df_self = pd.DataFrame(columns=["本文", "いいね数", "リポスト数", "リプライ数", "フォロワー数"])
 
     print(f"\nバズ投稿: {len(df_buzz)}件 / 自分の投稿: {len(df_self)}件")
