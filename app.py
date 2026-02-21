@@ -859,3 +859,179 @@ with tab8:
             file_name="claude_prompt.txt",
             mime="text/plain",
         )
+
+    st.divider()
+
+    # ============================================================
+    # 4. 対話型ポストビルダー（APIなし・完全無料）
+    # ============================================================
+    st.subheader("4. 対話型ポストビルダー")
+    st.caption("テーマ・体験を入力するだけで、分析法則に基づいたポストを自動生成（APIなし・無料）")
+
+    import random as _random
+
+    BUILDER_TEMPLATES = {
+        "拓巳型（自己開示×体験）": {
+            "desc": "「正直に言う」系の告白から入り、具体的な体験を語り、静かな気づきで締める。CTAなし。最もバズりやすいパターン。",
+            "fields": [
+                ("disclosure", "自己開示（失敗・弱点・恥ずかしいこと）", "例: 3ヶ月間ぜんぜん伸びなかった"),
+                ("experience", "具体的な体験・エピソード（数字があるとよい）", "例: 毎日投稿してたのに、いいねが一桁ばかりだった"),
+                ("insight", "気づき・学び（シンプルに）", "例: 内容より「書き方」の方が大事だった"),
+                ("ending", "締めの一文（余韻・問いかけでも可）", "例: 同じ悩みを持ってる人、いる？"),
+            ],
+            "openings": ["正直に言う。", "実は、", "ぶっちゃけると、", "告白します。", "ここだけの話。"],
+        },
+        "問題提起×共感型": {
+            "desc": "読者の不安・悩みに共感してから「でも実際やったら〇〇だった」と解決を提示。",
+            "fields": [
+                ("fear", "読者が感じている不安・疑問", "例: AI副業なんて怪しいと思ってた"),
+                ("result", "実際にやったらどうだったか（数字を含めると◎）", "例: 1日2時間で月5万円稼げた"),
+                ("method", "具体的にやったこと（1〜3行）", "例: ChatGPTでライティング案件を受けただけ"),
+                ("ending", "締め", "例: もっと早く始めればよかった"),
+            ],
+            "openings": ["「", "正直、", "以前の自分も思ってた。", ""],
+        },
+        "Before→After型": {
+            "desc": "過去の状態→現在の変化を並列で見せる。数字が命。リアルな変化がバズる。",
+            "fields": [
+                ("before_time", "いつ頃の話か", "例: 3ヶ月前"),
+                ("before_state", "以前の状態（数字を入れる）", "例: 残業月80時間、手取り25万"),
+                ("after_state", "今の状態（数字を入れる）", "例: 副業で月15万プラス"),
+                ("method", "変化のきっかけ・手段", "例: ChatGPT一本でライティング副業を始めた"),
+                ("insight", "一言の気づき", "例: やったもん勝ちだった"),
+            ],
+            "openings": [""],
+        },
+        "ノウハウ×箇条書き型": {
+            "desc": "保存されやすい「まとめ」「〇選」形式。ブックマーク20倍の重みを狙う。",
+            "fields": [
+                ("title", "タイトル（〇選・〇つのコツ等）", "例: ChatGPTで時短できること5選"),
+                ("item1", "ポイント①", "例: メール文章の作成（5分→30秒）"),
+                ("item2", "ポイント②", "例: 会議の議事録まとめ"),
+                ("item3", "ポイント③", "例: アイデア出し100個"),
+                ("ending", "締め（再現性・行動促進）", "例: 全部無料でできる"),
+            ],
+            "openings": [""],
+        },
+    }
+
+    builder_tmpl_name = st.selectbox(
+        "パターンを選択",
+        list(BUILDER_TEMPLATES.keys()),
+        key="builder_tmpl_v2"
+    )
+    tmpl_cfg = BUILDER_TEMPLATES[builder_tmpl_name]
+    st.info(tmpl_cfg["desc"])
+
+    # フィールド入力
+    field_values = {}
+    cols_b = st.columns(2)
+    for i, (key, label, placeholder) in enumerate(tmpl_cfg["fields"]):
+        with cols_b[i % 2]:
+            if key in ("experience", "method"):
+                field_values[key] = st.text_area(label, placeholder=placeholder, height=80, key=f"bf_{key}")
+            else:
+                field_values[key] = st.text_input(label, placeholder=placeholder, key=f"bf_{key}")
+
+    col_gen1, col_gen2 = st.columns([1, 4])
+    with col_gen1:
+        gen_clicked = st.button("ポストを生成", type="primary", key="builder_gen")
+    with col_gen2:
+        reshuffle = st.button("書き出しをシャッフル", key="builder_shuffle")
+
+    if gen_clicked or reshuffle:
+        fv = field_values
+        opening = _random.choice(tmpl_cfg["openings"])
+
+        if builder_tmpl_name == "拓巳型（自己開示×体験）":
+            disclosure = fv.get("disclosure") or "[自己開示を入力]"
+            experience = fv.get("experience") or "[体験を入力]"
+            insight = fv.get("insight") or "[気づきを入力]"
+            ending = (fv.get("ending") or "").strip()
+            post = f"{opening}{disclosure}\n\n{experience}\n\nそれで気づいたのは、{insight}。"
+            if ending:
+                post += f"\n\n{ending}"
+
+        elif builder_tmpl_name == "問題提起×共感型":
+            fear = fv.get("fear") or "[読者の不安を入力]"
+            result = fv.get("result") or "[結果を入力]"
+            method = fv.get("method") or "[方法を入力]"
+            ending = (fv.get("ending") or "").strip()
+            post = f"{opening}{fear}。\n\nでも実際やってみたら\n{result}。\n\n{method}"
+            if ending:
+                post += f"\n\n{ending}"
+
+        elif builder_tmpl_name == "Before→After型":
+            before_time = fv.get("before_time") or "以前"
+            before_state = fv.get("before_state") or "[以前の状態を入力]"
+            after_state = fv.get("after_state") or "[今の状態を入力]"
+            method = fv.get("method") or "[きっかけを入力]"
+            insight = (fv.get("insight") or "").strip()
+            post = f"{before_time}: {before_state}\n今: {after_state}\n\n{method}"
+            if insight:
+                post += f"\n\n{insight}"
+
+        elif builder_tmpl_name == "ノウハウ×箇条書き型":
+            title = fv.get("title") or "[タイトルを入力]"
+            items = [fv.get(f"item{j}", "").strip() for j in range(1, 4)]
+            items = [it for it in items if it]
+            ending = (fv.get("ending") or "").strip()
+            items_str = "\n".join(f"・{it}" for it in items) if items else "・[項目を入力]"
+            post = f"{title}\n\n{items_str}"
+            if ending:
+                post += f"\n\n{ending}"
+
+        else:
+            post = "[テンプレートを選択してください]"
+
+        st.session_state["builder_result_v2"] = post.strip()
+
+    # 生成結果表示
+    if "builder_result_v2" in st.session_state:
+        st.markdown("---")
+        st.markdown("**生成されたポスト（直接編集できます）**")
+        edited_post = st.text_area(
+            "編集エリア",
+            value=st.session_state["builder_result_v2"],
+            height=200,
+            key="builder_edit_v2",
+            label_visibility="collapsed"
+        )
+
+        if edited_post.strip():
+            from buzz_score_v2 import calculate_buzz_score_v2
+            from algorithm_analysis import calculate_algorithm_score
+
+            v2_res = calculate_buzz_score_v2(edited_post)
+            algo_res = calculate_algorithm_score(edited_post)
+            char_len = len(edited_post)
+            is_good_len = 130 <= char_len <= 170
+
+            col_s1, col_s2, col_s3, col_s4 = st.columns(4)
+            col_s1.metric("v2スコア", f"{v2_res['total_score']}点", help="バズ予測スコア（100点満点）")
+            col_s2.metric("Algoスコア", f"{algo_res['total_score']}点", help="Xアルゴリズム推定スコア（100点満点）")
+            col_s3.metric("文字数", f"{char_len}字",
+                          delta="最適" if is_good_len else ("短い（目標130-170字）" if char_len < 130 else "長い（目標130-170字）"),
+                          delta_color="normal" if is_good_len else "inverse")
+
+            # バズ要素チェック
+            secret_ok = any(p in edited_post for p in ["正直", "実は", "ド素人", "告白", "恥ずかしい", "ぶっちゃけ"])
+            num_ok = bool(re.search(r'\d+', edited_post))
+            no_cta = not any(p in edited_post for p in ["フォロー", "いいね", "RT", "リツイート", "保存", "ブックマーク"])
+            checks_pass = sum([secret_ok, num_ok, no_cta, is_good_len])
+            col_s4.metric("バズ要素", f"{checks_pass}/4",
+                          delta="OK" if checks_pass >= 3 else "要改善",
+                          delta_color="normal" if checks_pass >= 3 else "inverse")
+
+            # 要素別フィードバック
+            with st.expander("要素チェック詳細を見る"):
+                st.write(f"{'✅' if secret_ok else '⚠️'} 秘匿感フレーズ（正直・実は・告白等）{'あり' if secret_ok else ' → 追加推奨'}")
+                st.write(f"{'✅' if num_ok else '⚠️'} 具体的な数字{'あり' if num_ok else ' → 数字を入れると信頼感UP'}")
+                st.write(f"{'✅' if no_cta else '⚠️'} CTAなし{'（OK）' if no_cta else ' → フォロー・いいね誘導は削除推奨'}")
+                st.write(f"{'✅' if is_good_len else '⚠️'} 文字数130-170字（現在{char_len}字）")
+
+            # コピー用表示
+            st.markdown("**コピー用（右上のアイコンでコピー）**")
+            st.code(edited_post, language=None)
+
+            st.info("投稿タイミング: 18〜21時が最適（早期エンゲージメント最大化）")
