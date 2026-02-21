@@ -1807,6 +1807,82 @@ def generate_report(df, output_filename, original_count, excluded_count, df_raw=
             f.write(f"| {pat} | {rate:.3f} |\n")
         f.write("\n")
 
+        # === Xアルゴリズム分析 ===
+        print("Xアルゴリズム分析を実行中...")
+        try:
+            from algorithm_analysis import (
+                analyze_discussion_algorithm_value,
+                analyze_dwell_potential,
+                analyze_early_engagement_potential,
+                analyze_link_impact,
+                analyze_thread_potential,
+                analyze_tone_distribution,
+                calculate_algorithm_score,
+            )
+
+            f.write("## 15. Xアルゴリズム分析（Grok/Phoenix重みベース）\n\n")
+            f.write("> Xの公開アルゴリズム（xai-org/x-algorithm）の重みに基づいた分析\n\n")
+
+            # アルゴリズム加重スコア
+            disc_algo = analyze_discussion_algorithm_value(df)
+            f.write("### アルゴリズム加重エンゲージメント TOP5\n\n")
+            f.write("> いいね×0.5 + RT×1.0 + リプライ×13.5（リプライはいいねの27倍の価値）\n\n")
+            f.write("| 順位 | ユーザー | いいね | リプ | 加重スコア | 本文 |\n")
+            f.write("|------|---------|--------|------|----------|------|\n")
+            for i, r in enumerate(disc_algo["top10_by_algorithm"][:5], 1):
+                text = r["text"].replace("|", "｜").replace("\n", " ")[:30]
+                f.write(f"| {i} | @{r['user']} | {r['likes']:,} | {r['replies']:,} | {r['weighted_score']:,.0f} | {text} |\n")
+            f.write("\n")
+
+            # トーン分析
+            tone = analyze_tone_distribution(df)
+            f.write("### トーン分析（Grok評価推定）\n\n")
+            f.write("| トーン | 件数 | 平均いいね |\n")
+            f.write("|--------|------|----------|\n")
+            for t, count in sorted(tone["tone_distribution"].items(),
+                                    key=lambda x: tone["tone_avg_likes"].get(x[0], 0), reverse=True):
+                avg = tone["tone_avg_likes"].get(t, 0)
+                f.write(f"| {t} | {count} | {avg:.0f} |\n")
+            f.write(f"\nGrokフレンドリー平均: {tone['friendly_avg']:.0f} vs 非フレンドリー: {tone['unfriendly_avg']:.0f}\n\n")
+
+            # 外部リンク影響
+            link = analyze_link_impact(df)
+            f.write("### 外部リンクの影響\n\n")
+            f.write(f"- 外部リンクあり: {link['external_count']}件（平均いいね: {link['external_avg_likes']:.0f}）\n")
+            f.write(f"- リンクなし: {link['no_link_count']}件（平均いいね: {link['no_link_avg_likes']:.0f}）\n\n")
+
+            # スレッド構造
+            thread = analyze_thread_potential(df)
+            f.write("### スレッド構造\n\n")
+            f.write(f"- スレッド型: {thread['thread_count']}件（平均いいね: {thread['thread_avg_likes']:.0f}）\n")
+            f.write(f"- 単発型: {thread['non_thread_count']}件（平均いいね: {thread['non_thread_avg_likes']:.0f}）\n\n")
+
+            # 滞在時間
+            dwell = analyze_dwell_potential(df)
+            f.write("### 滞在時間推定\n\n")
+            f.write(f"平均滞在時間スコア: {dwell['avg_dwell_score']:.1f}/20点\n\n")
+            f.write("| 滞在時間帯 | 件数 | 平均いいね |\n")
+            f.write("|-----------|------|----------|\n")
+            for bucket in ["高(15-20)", "中(10-14)", "低(0-9)"]:
+                count = dwell["bucket_counts"].get(bucket, 0)
+                avg = dwell["bucket_avg_likes"].get(bucket, 0)
+                f.write(f"| {bucket} | {count} | {avg:.0f} |\n")
+            f.write("\n")
+
+            # 早期エンゲージメント
+            early = analyze_early_engagement_potential(df)
+            f.write("### 早期エンゲージメント予測\n\n")
+            f.write("| 予測速度 | 件数 | 平均いいね |\n")
+            f.write("|---------|------|----------|\n")
+            for v in ["高速", "中速", "低速"]:
+                count = early["velocity_counts"].get(v, 0)
+                avg = early["velocity_avg_likes"].get(v, 0)
+                f.write(f"| {v} | {count} | {avg:.0f} |\n")
+            f.write("\n")
+
+        except Exception as e:
+            print(f"  Xアルゴリズム分析をスキップ: {e}")
+
         # === まとめ ===
         f.write("## まとめ\n\n")
         f.write("### バズる投稿の必須要素\n\n")
