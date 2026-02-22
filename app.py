@@ -36,6 +36,37 @@ def get_conn():
     return sqlite3.connect(DB_PATH)
 
 
+def get_account_list():
+    """posts + account_followers の全アカウントをABC順（大文字小文字無視）で返す"""
+    conn = get_conn()
+    rows = conn.execute(
+        """
+        SELECT DISTINCT account FROM posts WHERE account != ''
+        UNION
+        SELECT account FROM account_followers WHERE account != ''
+        """
+    ).fetchall()
+    conn.close()
+    return sorted([r[0] for r in rows], key=str.lower)
+
+
+def account_filter_ui(label="アカウント名でフィルター（部分一致）",
+                      placeholder="例: Mr_boten",
+                      key_prefix="acct"):
+    """テキストフィルター + ドロップダウンのUI部品。選択されたアカウント名を返す"""
+    account_list = get_account_list()
+    filter_val = st.text_input(label, placeholder=placeholder, key=f"{key_prefix}_filter")
+    if filter_val:
+        filtered = [a for a in account_list if filter_val.lower() in a.lower()]
+        if not filtered:
+            st.caption("一致するアカウントがありません。全件表示中。")
+            filtered = account_list
+    else:
+        filtered = account_list
+    selected = st.selectbox("アカウントを選択", filtered, key=f"{key_prefix}_select")
+    return selected
+
+
 def to_naive_datetime(series):
     """タイムゾーン付き・なし混在をtz-naiveに統一する"""
     result = pd.to_datetime(series, errors="coerce", utc=True)
@@ -255,18 +286,10 @@ with tab2:
             "SELECT account, followers, updated_at FROM account_followers ORDER BY followers DESC",
             conn
         )
-        # postsのアカウント + account_followersのアカウントを合算（Mr_botenなど投稿未登録でも表示）
-        all_accounts = conn.execute(
-            """
-            SELECT DISTINCT account FROM posts WHERE account != ''
-            UNION
-            SELECT account FROM account_followers WHERE account != ''
-            """
-        ).fetchall()
         conn.close()
 
-        # ABC順（大文字小文字無視）でソート
-        account_list = sorted([r[0] for r in all_accounts], key=str.lower)
+        # 全アカウント一覧（posts + account_followers、ABC順）
+        account_list = get_account_list()
 
         # テキストフィルター → ドロップダウンに反映
         fw_filter = st.text_input(
@@ -286,7 +309,6 @@ with tab2:
         with col_fw1:
             fw_account = st.selectbox("アカウントを選択", filtered_accounts, key="fw_account")
         with col_fw2:
-            # 既存値があれば初期値にセット
             existing = df_followers[df_followers["account"] == fw_account]["followers"].values
             default_val = int(existing[0]) if len(existing) > 0 else 0
             fw_count = st.number_input("フォロワー数", min_value=0, value=default_val, step=100, key="fw_count")
@@ -300,7 +322,6 @@ with tab2:
                     "INSERT OR REPLACE INTO account_followers (account, followers, updated_at) VALUES (?,?,?)",
                     (fw_account, fw_count, now)
                 )
-                # そのアカウントの全投稿にfollower_countを適用
                 conn.execute(
                     "UPDATE posts SET follower_count=? WHERE account=?",
                     (fw_count, fw_account)
@@ -310,7 +331,7 @@ with tab2:
                 st.success(f"{fw_account}: {fw_count:,}人を登録しました")
                 st.rerun()
 
-        # 全アカウント フォロワー一覧（登録済み・未登録を両方表示）
+        # 全アカウント フォロワー一覧（登録済み・未登録を全件表示）
         st.markdown("**全アカウント フォロワー一覧**")
         df_all_acc = pd.DataFrame({"account": account_list})
         df_all_merged = df_all_acc.merge(
@@ -321,17 +342,16 @@ with tab2:
             lambda x: f"{int(x):,}人" if pd.notna(x) and x > 0 else "未登録"
         )
         df_all_merged["更新日時"] = df_all_merged["updated_at"].fillna("").str[:10]
-        df_fw_all_disp = df_all_merged[["account", "フォロワー数", "更新日時"]].rename(
-            columns={"account": "アカウント"}
+        # 登録済み件数のサマリー
+        registered_cnt = df_all_merged["followers"].notna().sum()
+        st.caption(f"登録済み: {registered_cnt}件 / 全{len(account_list)}アカウント")
+        st.dataframe(
+            df_all_merged[["account", "フォロワー数", "更新日時"]].rename(
+                columns={"account": "アカウント"}
+            ),
+            use_container_width=True,
+            hide_index=True,
         )
-        # Mr_boten の登録状況を確認
-        mr_boten_row = df_all_merged[df_all_merged["account"].str.lower() == "mr_boten"]
-        if not mr_boten_row.empty and mr_boten_row["followers"].notna().any():
-            val = int(mr_boten_row["followers"].dropna().iloc[0])
-            st.caption(f"Mr_boten: {val:,}人 登録済み")
-        else:
-            st.warning("Mr_boten のフォロワー数が未登録です。上のフォームから登録してください。")
-        st.dataframe(df_fw_all_disp, use_container_width=True, hide_index=True)
 
         st.divider()
 
