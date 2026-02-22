@@ -328,19 +328,29 @@ with tab2:
             df_fw_band["フォロワー帯"] = pd.cut(
                 df_fw_band["followers"], bins=bins, labels=labels, right=True
             )
+            # 1回のagg()で全項目を集計（二重groupbyによる長さ不一致を回避）
             band_avg = df_fw_band.groupby("フォロワー帯", observed=True).agg(
                 アカウント数=("account", "nunique"),
+                投稿数=("likes", "count"),
+                いいね合計=("likes", "sum"),
                 平均いいね=("likes", "mean"),
                 平均RT=("retweets", "mean"),
+                平均フォロワー数=("followers", "mean"),
             ).round(1).reset_index()
-            band_avg["エンゲージメント率(%)"] = (
-                band_avg["平均いいね"] / df_fw_band.groupby(
-                    pd.cut(df_fw_band["followers"], bins=bins, labels=labels, right=True),
-                    observed=True
-                )["followers"].mean() * 100
-            ).round(2).values
 
-            st.dataframe(band_avg, use_container_width=True, hide_index=True)
+            # エンゲージメント率 = (いいね合計 / (平均フォロワー数 × 投稿数)) × 100
+            # ゼロ除算・NaN対応
+            band_avg["エンゲージメント率(%)"] = band_avg.apply(
+                lambda r: round(r["いいね合計"] / (r["平均フォロワー数"] * r["投稿数"]) * 100, 2)
+                if r["平均フォロワー数"] > 0 and r["投稿数"] > 0 else None,
+                axis=1,
+            )
+
+            st.dataframe(
+                band_avg.drop(columns=["いいね合計"]),
+                use_container_width=True,
+                hide_index=True,
+            )
         else:
             st.info("フォロワー数を登録するとフォロワー帯別分析が表示されます。")
     else:
