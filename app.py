@@ -256,15 +256,30 @@ with tab2:
             conn
         )
         all_accounts = conn.execute(
-            "SELECT DISTINCT account FROM posts WHERE account != '' ORDER BY account"
+            "SELECT DISTINCT account FROM posts WHERE account != ''"
         ).fetchall()
         conn.close()
 
-        account_list = [r[0] for r in all_accounts]
+        # ABC順（大文字小文字無視）でソート
+        account_list = sorted([r[0] for r in all_accounts], key=str.lower)
+
+        # テキストフィルター → ドロップダウンに反映
+        fw_filter = st.text_input(
+            "アカウント名でフィルター（部分一致）",
+            key="fw_filter",
+            placeholder="例: mr_boten"
+        )
+        filtered_accounts = (
+            [a for a in account_list if fw_filter.lower() in a.lower()]
+            if fw_filter else account_list
+        )
+        if fw_filter and not filtered_accounts:
+            st.caption("一致するアカウントがありません。全件表示中。")
+            filtered_accounts = account_list
 
         col_fw1, col_fw2, col_fw3 = st.columns([2, 1, 1])
         with col_fw1:
-            fw_account = st.selectbox("アカウントを選択", account_list, key="fw_account")
+            fw_account = st.selectbox("アカウントを選択", filtered_accounts, key="fw_account")
         with col_fw2:
             # 既存値があれば初期値にセット
             existing = df_followers[df_followers["account"] == fw_account]["followers"].values
@@ -290,14 +305,28 @@ with tab2:
                 st.success(f"{fw_account}: {fw_count:,}人を登録しました")
                 st.rerun()
 
-        # 登録済みフォロワー数一覧
-        if not df_followers.empty:
-            st.markdown("**登録済みフォロワー数**")
-            df_fw_disp = df_followers.rename(columns={
-                "account": "アカウント", "followers": "フォロワー数", "updated_at": "更新日時"
-            })
-            df_fw_disp["更新日時"] = df_fw_disp["更新日時"].str[:10]
-            st.dataframe(df_fw_disp, use_container_width=True, hide_index=True)
+        # 全アカウント フォロワー一覧（登録済み・未登録を両方表示）
+        st.markdown("**全アカウント フォロワー一覧**")
+        df_all_acc = pd.DataFrame({"account": account_list})
+        df_all_merged = df_all_acc.merge(
+            df_followers[["account", "followers", "updated_at"]],
+            on="account", how="left"
+        )
+        df_all_merged["フォロワー数"] = df_all_merged["followers"].apply(
+            lambda x: f"{int(x):,}人" if pd.notna(x) and x > 0 else "未登録"
+        )
+        df_all_merged["更新日時"] = df_all_merged["updated_at"].fillna("").str[:10]
+        df_fw_all_disp = df_all_merged[["account", "フォロワー数", "更新日時"]].rename(
+            columns={"account": "アカウント"}
+        )
+        # Mr_boten の登録状況を確認
+        mr_boten_row = df_all_merged[df_all_merged["account"].str.lower() == "mr_boten"]
+        if not mr_boten_row.empty and mr_boten_row["followers"].notna().any():
+            val = int(mr_boten_row["followers"].dropna().iloc[0])
+            st.caption(f"Mr_boten: {val:,}人 登録済み")
+        else:
+            st.warning("Mr_boten のフォロワー数が未登録です。上のフォームから登録してください。")
+        st.dataframe(df_fw_all_disp, use_container_width=True, hide_index=True)
 
         st.divider()
 
