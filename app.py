@@ -255,8 +255,13 @@ with tab2:
             "SELECT account, followers, updated_at FROM account_followers ORDER BY followers DESC",
             conn
         )
+        # postsのアカウント + account_followersのアカウントを合算（Mr_botenなど投稿未登録でも表示）
         all_accounts = conn.execute(
-            "SELECT DISTINCT account FROM posts WHERE account != ''"
+            """
+            SELECT DISTINCT account FROM posts WHERE account != ''
+            UNION
+            SELECT account FROM account_followers WHERE account != ''
+            """
         ).fetchall()
         conn.close()
 
@@ -267,14 +272,14 @@ with tab2:
         fw_filter = st.text_input(
             "アカウント名でフィルター（部分一致）",
             key="fw_filter",
-            placeholder="例: mr_boten"
+            placeholder="例: Mr_boten"
         )
-        filtered_accounts = (
-            [a for a in account_list if fw_filter.lower() in a.lower()]
-            if fw_filter else account_list
-        )
-        if fw_filter and not filtered_accounts:
-            st.caption("一致するアカウントがありません。全件表示中。")
+        if fw_filter:
+            filtered_accounts = [a for a in account_list if fw_filter.lower() in a.lower()]
+            if not filtered_accounts:
+                st.caption("一致するアカウントがありません。全件表示中。")
+                filtered_accounts = account_list
+        else:
             filtered_accounts = account_list
 
         col_fw1, col_fw2, col_fw3 = st.columns([2, 1, 1])
