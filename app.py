@@ -3,15 +3,28 @@
 import os
 import sqlite3
 import tempfile
+from collections import Counter
 from datetime import datetime
 
 import pandas as pd
 import plotly.express as px
 import streamlit as st
 
+from algorithm_analysis import (
+    analyze_discussion_algorithm_value,
+    analyze_dwell_potential,
+    analyze_early_engagement_potential,
+    analyze_link_impact,
+    analyze_thread_potential,
+    analyze_tone,
+    analyze_tone_distribution,
+    calculate_algorithm_score,
+    predict_early_engagement,
+)
 from analyze_posts import calculate_buzz_score
 from buzz_score_v2 import calculate_buzz_score_v2
 from import_csv import DB_PATH, import_file, init_db
+from reader_psychology import analyze_reader_psychology
 
 st.set_page_config(page_title="バズ分析ダッシュボード", layout="wide")
 st.title("バズ投稿 分析ダッシュボード")
@@ -104,9 +117,10 @@ st.divider()
 # ============================================================
 # タブ切り替え
 # ============================================================
-tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10 = st.tabs([
     "投稿一覧", "アカウント別分析", "ソースファイル別", "投稿パターン分析",
-    "スコア診断", "スコア精度推移", "重複管理", "投稿作成"
+    "スコア診断", "スコア精度推移", "重複管理", "投稿作成",
+    "読者心理分析", "Xアルゴリズム分析",
 ])
 
 # ============================================================
@@ -859,3 +873,375 @@ with tab8:
             file_name="claude_prompt.txt",
             mime="text/plain",
         )
+
+# ============================================================
+# TAB9: 読者心理分析
+# ============================================================
+with tab9:
+    st.header("読者心理分析")
+    st.caption("投稿を読んだ読者がなぜいいね/RT/リプ/ブクマ/フォローしたか、心理を言語化する")
+
+    # ---- 1. 単体投稿分析 ----
+    st.subheader("1. 投稿テキストを分析")
+
+    col_psych_l, col_psych_r = st.columns([2, 1])
+    with col_psych_l:
+        psych_text = st.text_area(
+            "投稿テキストを入力",
+            height=120,
+            key="psych_text",
+            placeholder="投稿テキストを貼り付けてください..."
+        )
+    with col_psych_r:
+        psych_likes = st.number_input("いいね数（参考値）", min_value=0, value=0, step=10, key="psych_likes")
+        psych_rt = st.number_input("RT数", min_value=0, value=0, step=1, key="psych_rt")
+        psych_rep = st.number_input("リプライ数", min_value=0, value=0, step=1, key="psych_rep")
+
+    # DBから投稿を選択して入力欄を補完
+    if total > 0:
+        with st.expander("またはDBの投稿から選択"):
+            conn = get_conn()
+            df_psych_sample = pd.read_sql(
+                "SELECT account, text, likes, retweets, replies FROM posts ORDER BY likes DESC LIMIT 50",
+                conn
+            )
+            conn.close()
+            sel_opts = [
+                f"いいね{r['likes']}件 @{r['account']}: {r['text'][:40]}..."
+                for _, r in df_psych_sample.iterrows()
+            ]
+            sel_idx = st.selectbox(
+                "投稿を選択", range(len(sel_opts)),
+                format_func=lambda i: sel_opts[i], key="psych_sel"
+            )
+            if st.button("この投稿を上の入力欄に反映", key="psych_from_db"):
+                row = df_psych_sample.iloc[sel_idx]
+                st.session_state["psych_text"] = row["text"]
+                st.session_state["psych_likes"] = int(row["likes"])
+                st.session_state["psych_rt"] = int(row["retweets"])
+                st.session_state["psych_rep"] = int(row["replies"])
+                st.rerun()
+
+    if psych_text.strip():
+        result = analyze_reader_psychology(psych_text, psych_likes, psych_rt, psych_rep)
+
+        col_m1, col_m2, col_m3 = st.columns(3)
+        col_m1.metric("読者の第一感情", result["primary_emotion"])
+        col_m2.metric("Grokトーン評価", result["tone"])
+        col_m3.metric("なぜバズったか", "↓確認")
+
+        st.info(f"**分析サマリー:** {result['one_line_why']}")
+
+        col_tl, col_tr = st.columns(2)
+        with col_tl:
+            if result["like_triggers"]:
+                st.markdown("**❤️ いいねの心理**")
+                for t in result["like_triggers"]:
+                    st.write(f"• **{t['trigger']}**")
+                    st.caption(f"  → {t['psychology']}")
+
+            if result["rt_triggers"]:
+                st.markdown("**🔁 RTの心理**")
+                for t in result["rt_triggers"]:
+                    st.write(f"• **{t['trigger']}**")
+                    st.caption(f"  → {t['psychology']}")
+
+        with col_tr:
+            if result["reply_triggers"]:
+                st.markdown("**💬 リプライの心理**")
+                for t in result["reply_triggers"]:
+                    st.write(f"• **{t['trigger']}**")
+                    st.caption(f"  → {t['psychology']}")
+
+            if result["bookmark_triggers"]:
+                st.markdown("**🔖 ブックマーク要因**")
+                for t in result["bookmark_triggers"]:
+                    st.write(f"• **{t['trigger']}**")
+                    st.caption(f"  → {t['psychology']}")
+
+            if result["follow_triggers"]:
+                st.markdown("**👤 フォロー要因**")
+                for t in result["follow_triggers"]:
+                    st.write(f"• **{t['trigger']}**")
+                    st.caption(f"  → {t['psychology']}")
+
+        if not any([result["like_triggers"], result["rt_triggers"], result["reply_triggers"]]):
+            st.warning("明確なトリガーが検出されませんでした。拓巳の方程式（等身大の告白×具体的体験）を意識してみてください。")
+
+    st.divider()
+
+    # ---- 2. DB全体の心理パターン統計 ----
+    st.subheader("2. DB全体の心理パターン統計（上位100件）")
+
+    if total > 0:
+        if st.button("統計を表示", key="psych_stats_btn"):
+            conn = get_conn()
+            df_psych_db = pd.read_sql(
+                "SELECT text, likes, retweets, replies FROM posts WHERE likes > 0 ORDER BY likes DESC LIMIT 100",
+                conn
+            )
+            conn.close()
+
+            with st.spinner("100件を分析中..."):
+                all_psych = [
+                    analyze_reader_psychology(
+                        str(r["text"] or ""),
+                        int(r["likes"] or 0),
+                        int(r["retweets"] or 0),
+                        int(r["replies"] or 0),
+                    )
+                    for _, r in df_psych_db.iterrows()
+                ]
+                likes_list = df_psych_db["likes"].fillna(0).astype(int).tolist()
+
+            # 感情分布
+            emotion_cnt = Counter(r["primary_emotion"] for r in all_psych)
+            emotion_likes_map = {}
+            for r, lk in zip(all_psych, likes_list):
+                emotion_likes_map.setdefault(r["primary_emotion"], []).append(lk)
+            df_emotion = pd.DataFrame([
+                {
+                    "感情": e,
+                    "出現数": c,
+                    "平均いいね": round(sum(emotion_likes_map[e]) / len(emotion_likes_map[e])),
+                }
+                for e, c in emotion_cnt.most_common()
+            ])
+
+            col_e1, col_e2 = st.columns(2)
+            with col_e1:
+                st.markdown("**読者の第一感情 分布**")
+                st.dataframe(df_emotion, use_container_width=True, hide_index=True)
+            with col_e2:
+                fig_e = px.bar(df_emotion, x="感情", y="平均いいね", title="感情別 平均いいね")
+                fig_e.update_layout(margin=dict(t=30, b=20))
+                st.plotly_chart(fig_e, use_container_width=True)
+
+            # いいねトリガー分布
+            like_trigger_cnt = Counter(
+                t["trigger"] for r in all_psych for t in r["like_triggers"]
+            )
+            like_trigger_likes = {}
+            for r, lk in zip(all_psych, likes_list):
+                for t in r["like_triggers"]:
+                    like_trigger_likes.setdefault(t["trigger"], []).append(lk)
+
+            if like_trigger_cnt:
+                df_like_trg = pd.DataFrame([
+                    {
+                        "トリガー": t,
+                        "出現数": c,
+                        "平均いいね": round(sum(like_trigger_likes[t]) / len(like_trigger_likes[t])),
+                    }
+                    for t, c in like_trigger_cnt.most_common()
+                ])
+                st.markdown("**いいねトリガー 出現頻度（上位100件中）**")
+                st.dataframe(df_like_trg, use_container_width=True, hide_index=True)
+    else:
+        st.info("データがありません。")
+
+# ============================================================
+# TAB10: Xアルゴリズム分析
+# ============================================================
+with tab10:
+    st.header("Xアルゴリズム分析")
+    st.caption("Xの公開アルゴリズム（Phoenix/Grok）に基づく投稿スコア分析")
+
+    # ---- 1. 単体スコア診断 ----
+    st.subheader("1. 投稿スコア診断")
+
+    algo_input = st.text_area(
+        "投稿テキストを入力",
+        height=120,
+        key="algo_input",
+        placeholder="テキストを貼り付けるとXアルゴリズムスコアを計算します..."
+    )
+    has_premium = st.checkbox("X Premium加入（4倍ブースト）", key="algo_premium")
+
+    if algo_input.strip():
+        algo_result = calculate_algorithm_score(algo_input, has_premium=has_premium)
+        early_result = predict_early_engagement(algo_input)
+        tone_result = analyze_tone(algo_input)
+
+        col_a1, col_a2, col_a3 = st.columns(3)
+        col_a1.metric("Xアルゴリズムスコア", f"{algo_result['total_score']} / 100点")
+        col_a2.metric("早期反応速度", early_result["predicted_velocity"])
+        col_a3.metric(
+            "Grokトーン評価",
+            tone_result["overall"],
+            "Grokフレンドリー" if tone_result["grok_friendly"] else "要改善",
+        )
+
+        FACTOR_DESCS = {
+            "リプライ誘発力": "リプライ重み13.5×。疑問形・意見求めフレーズで加点（最大25点）",
+            "滞在時間": "2分超で+10重み。文字数・構造・数字で加点（最大20点）",
+            "スレッド・会話": "スレッド=3倍ブースト。会話クリック重み11.0（最大15点）",
+            "トーン": "Grokがポジティブ・建設的を評価。攻撃的は抑制（最大15点）",
+            "ブックマーク誘発": "ブックマーク重み10.0。リスト・テンプレ・数字で加点（最大10点）",
+            "外部リンク": "外部リンクで50%リーチ減（ペナルティ）",
+            "プロフクリック誘発": "プロフクリック重み12.0。秘匿感・自己開示で加点（最大10点）",
+            "早期反応性": "投稿後1時間で50%決まる。冒頭インパクトで加点（最大5点）",
+        }
+
+        st.subheader("要素別スコア内訳")
+        df_factors = pd.DataFrame([
+            {"要素": k, "得点": v, "説明": FACTOR_DESCS.get(k, "")}
+            for k, v in algo_result["factors"].items()
+        ])
+        st.dataframe(df_factors, use_container_width=True, hide_index=True)
+
+        # 改善アドバイス
+        FACTOR_MAX = {
+            "リプライ誘発力": 25, "滞在時間": 20, "スレッド・会話": 15, "トーン": 15,
+            "ブックマーク誘発": 10, "プロフクリック誘発": 10, "早期反応性": 5,
+        }
+        FACTOR_ADVICE = {
+            "リプライ誘発力": "疑問形・「みんなはどう思う？」など意見を求めるフレーズを追加",
+            "滞在時間": "具体的な数字・箇条書き・ストーリー構造で読ませる工夫を",
+            "スレッド・会話": "スレッド形式を試す（3倍ブースト）。「↓詳細は」などで誘導",
+            "トーン": "学び・体験・提案の建設的トーンに。感情的批判は控える",
+            "ブックマーク誘発": "「○○選」「チェックリスト」「テンプレ」形式で保存価値UP",
+            "外部リンク": "外部リンクは本文ではなくリプライに書く（50%減衰回避）",
+            "プロフクリック誘発": "「実は私…」「ここだけの話」で「誰？」と思わせる",
+            "早期反応性": "冒頭30字以内にインパクト・感情ワードを入れる",
+        }
+
+        weak = [
+            (k, v) for k, v in algo_result["factors"].items()
+            if FACTOR_MAX.get(k, 0) > 0 and v < FACTOR_MAX.get(k, 10) * 0.5
+        ]
+        if weak:
+            st.subheader("改善ポイント")
+            for k, v in sorted(weak, key=lambda x: FACTOR_MAX.get(x[0], 10) - x[1], reverse=True):
+                advice = FACTOR_ADVICE.get(k, "")
+                st.write(f"⚠️ **{k}**（{v}/{FACTOR_MAX.get(k, 10)}点）: {advice}")
+        else:
+            st.success("全要素のスコアが高いです。このまま投稿してみましょう。")
+
+        if early_result["signals"]:
+            st.caption("早期エンゲージメントシグナル: " + " / ".join(early_result["signals"]))
+
+    st.divider()
+
+    # ---- 2. DB全体のXアルゴリズム分析 ----
+    st.subheader("2. DB全体のXアルゴリズム分析")
+
+    if total > 0:
+        if st.button("DB全体を分析", key="algo_db_btn"):
+            conn = get_conn()
+            df_algo_raw = pd.read_sql(
+                "SELECT text, likes, retweets, replies, account FROM posts WHERE likes > 0",
+                conn
+            )
+            conn.close()
+            df_algo_jp = df_algo_raw.rename(columns={
+                "text": "本文", "likes": "いいね数",
+                "retweets": "リポスト数", "replies": "リプライ数", "account": "ユーザー名",
+            })
+
+            with st.spinner("分析中..."):
+                disc = analyze_discussion_algorithm_value(df_algo_jp)
+                thread = analyze_thread_potential(df_algo_jp)
+                link = analyze_link_impact(df_algo_jp)
+                tone_dist = analyze_tone_distribution(df_algo_jp)
+                dwell = analyze_dwell_potential(df_algo_jp)
+                early_all = analyze_early_engagement_potential(df_algo_jp)
+
+            # アルゴリズム加重ランキング
+            st.markdown("### アルゴリズム加重スコア TOP10")
+            st.caption("いいね×0.5 + RT×1.0 + リプライ×13.5（Xアルゴリズム公式重み）")
+            if disc["top10_by_algorithm"]:
+                df_disc = pd.DataFrame([
+                    {
+                        "アカウント": r["user"],
+                        "いいね": r["likes"],
+                        "RT": r["retweets"],
+                        "リプライ": r["replies"],
+                        "加重スコア": round(r["weighted_score"]),
+                        "議論率": round(r["discussion_rate"], 3),
+                        "本文": r["text"],
+                    }
+                    for r in disc["top10_by_algorithm"]
+                ])
+                st.dataframe(df_disc, use_container_width=True, hide_index=True)
+
+            col_x1, col_x2 = st.columns(2)
+
+            with col_x1:
+                st.markdown("### スレッド vs 単発")
+                df_th = pd.DataFrame([
+                    {"種別": "スレッド型", "件数": thread["thread_count"],
+                     "平均いいね": round(thread["thread_avg_likes"])},
+                    {"種別": "単発投稿", "件数": thread["non_thread_count"],
+                     "平均いいね": round(thread["non_thread_avg_likes"])},
+                ])
+                st.dataframe(df_th, use_container_width=True, hide_index=True)
+                if thread["non_thread_avg_likes"] > 0:
+                    ratio = thread["thread_avg_likes"] / thread["non_thread_avg_likes"]
+                    st.caption(f"スレッドは単発の {ratio:.1f} 倍")
+
+                st.markdown("### リンク有無の影響")
+                df_lk = pd.DataFrame([
+                    {"リンク": "外部リンクあり", "件数": link["external_count"],
+                     "平均いいね": round(link["external_avg_likes"])},
+                    {"リンク": "X内リンク", "件数": link["x_link_count"],
+                     "平均いいね": round(link["x_link_avg_likes"])},
+                    {"リンク": "リンクなし", "件数": link["no_link_count"],
+                     "平均いいね": round(link["no_link_avg_likes"])},
+                ])
+                st.dataframe(df_lk, use_container_width=True, hide_index=True)
+                if link["reach_penalty_confirmed"]:
+                    st.caption("データで確認: リンクなし投稿の方が平均いいねが高い")
+
+            with col_x2:
+                st.markdown("### Grokトーン分布")
+                df_tn = pd.DataFrame([
+                    {
+                        "トーン": k,
+                        "件数": v,
+                        "平均いいね": round(tone_dist["tone_avg_likes"].get(k, 0)),
+                    }
+                    for k, v in sorted(
+                        tone_dist["tone_distribution"].items(),
+                        key=lambda x: tone_dist["tone_avg_likes"].get(x[0], 0),
+                        reverse=True,
+                    )
+                ])
+                st.dataframe(df_tn, use_container_width=True, hide_index=True)
+
+                st.markdown("### 早期反応速度別パフォーマンス")
+                df_ev = pd.DataFrame([
+                    {
+                        "速度": v,
+                        "件数": early_all["velocity_counts"].get(v, 0),
+                        "平均いいね": round(early_all["velocity_avg_likes"].get(v, 0)),
+                    }
+                    for v in ["高速", "中速", "低速"]
+                ])
+                st.dataframe(df_ev, use_container_width=True, hide_index=True)
+
+            st.markdown("### 滞在時間スコア帯別パフォーマンス")
+            df_dw = pd.DataFrame([
+                {
+                    "滞在時間帯": k,
+                    "件数": dwell["bucket_counts"].get(k, 0),
+                    "平均いいね": round(dwell["bucket_avg_likes"].get(k, 0)),
+                }
+                for k in ["高(15-20)", "中(10-14)", "低(0-9)"]
+            ])
+            st.dataframe(df_dw, use_container_width=True, hide_index=True)
+
+            if disc.get("cat_algorithm_scores"):
+                st.markdown("### カテゴリ別 アルゴリズム加重スコア")
+                df_cat = pd.DataFrame([
+                    {"カテゴリ": k, "平均加重スコア": round(v)}
+                    for k, v in sorted(
+                        disc["cat_algorithm_scores"].items(), key=lambda x: x[1], reverse=True
+                    )
+                ])
+                fig_c = px.bar(df_cat, x="カテゴリ", y="平均加重スコア")
+                fig_c.update_xaxes(tickangle=-45)
+                fig_c.update_layout(margin=dict(t=20, b=80))
+                st.plotly_chart(fig_c, use_container_width=True)
+    else:
+        st.info("データがありません。")
