@@ -1,6 +1,3 @@
-requests
-python-dotenv
-openpyxl
+streamlit>=1.32.0
 pandas
-matplotlib
-streamlit
+openpyxl
