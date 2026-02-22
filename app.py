@@ -884,6 +884,13 @@ with tab9:
     # ---- 1. 単体投稿分析 ----
     st.subheader("1. 投稿テキストを分析")
 
+    # DBから選択した値を、ウィジェット生成前にセット（ウィジェットkeyへの直接代入をここで行う）
+    if "psych_text_preload" in st.session_state:
+        st.session_state["psych_text"] = st.session_state.pop("psych_text_preload")
+        st.session_state["psych_likes"] = st.session_state.pop("psych_likes_preload", 0)
+        st.session_state["psych_rt"] = st.session_state.pop("psych_rt_preload", 0)
+        st.session_state["psych_rep"] = st.session_state.pop("psych_rep_preload", 0)
+
     col_psych_l, col_psych_r = st.columns([2, 1])
     with col_psych_l:
         psych_text = st.text_area(
@@ -916,10 +923,11 @@ with tab9:
             )
             if st.button("この投稿を上の入力欄に反映", key="psych_from_db"):
                 row = df_psych_sample.iloc[sel_idx]
-                st.session_state["psych_text"] = row["text"]
-                st.session_state["psych_likes"] = int(row["likes"])
-                st.session_state["psych_rt"] = int(row["retweets"])
-                st.session_state["psych_rep"] = int(row["replies"])
+                # preloadキーに書き込み → rerun後にウィジェット生成前で処理
+                st.session_state["psych_text_preload"] = row["text"]
+                st.session_state["psych_likes_preload"] = int(row["likes"])
+                st.session_state["psych_rt_preload"] = int(row["retweets"])
+                st.session_state["psych_rep_preload"] = int(row["replies"])
                 st.rerun()
 
     if psych_text.strip():
