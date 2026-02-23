@@ -15,12 +15,15 @@ python cli_post_builder.py で起動。
 import argparse
 import random
 import re
+import sqlite3
 import sys
 import os
 
 from buzz_score_v2 import calculate_buzz_score_v2
 from algorithm_analysis import calculate_algorithm_score, analyze_tone
 from reader_psychology import analyze_reader_psychology
+
+DB_PATH = "data/buzz_database.db"
 
 
 # ========================================
@@ -571,6 +574,335 @@ def compare_posts():
 
 
 # ========================================
+# 自動ポスト生成（DBデータ駆動）
+# ========================================
+
+def _load_top_posts(min_likes=100, limit=200):
+    """DBからバズ投稿を読み込む"""
+    if not os.path.exists(DB_PATH):
+        print("  エラー: データベースが見つかりません")
+        return []
+
+    conn = sqlite3.connect(DB_PATH)
+    rows = conn.execute(
+        "SELECT text, likes, retweets, replies FROM posts "
+        "WHERE likes >= ? AND text != '' ORDER BY likes DESC LIMIT ?",
+        (min_likes, limit),
+    ).fetchall()
+    conn.close()
+    return [{"text": r[0], "likes": r[1], "retweets": r[2], "replies": r[3]} for r in rows]
+
+
+def _extract_buzz_patterns(posts):
+    """バズ投稿から冒頭・構造・トピックのパターンを抽出"""
+    openings = []
+    tools_mentioned = []
+    number_exprs = []
+    structures = []
+
+    tool_re = re.compile(
+        r'(ChatGPT|Claude|Claude Code|Gemini|Copilot|Cursor|Manus|'
+        r'Midjourney|Canva|Notion AI|Playwright|Shopify|v0|Bolt|Grok)',
+        re.IGNORECASE,
+    )
+    number_re = re.compile(r'(\d+(?:万円|円|倍|選|つ|個|分|時間|日|ヶ月|年|%|件|ステップ))')
+
+    for p in posts:
+        text = str(p["text"])
+        lines = text.strip().split("\n")
+        first = lines[0].strip()
+
+        # 冒頭パターン収集（短すぎ・URL除外）
+        if len(first) > 5 and not first.startswith("http"):
+            openings.append(first)
+
+        # ツール名
+        for m in tool_re.finditer(text):
+            tools_mentioned.append(m.group())
+
+        # 数字表現
+        number_exprs.extend(number_re.findall(text))
+
+        # 構造タイプ判定
+        if re.search(r'[①②③④⑤]|[1-5][\.．]', text):
+            structures.append("listicle")
+        elif "→" in text or "Before" in text.lower() or "After" in text.lower():
+            structures.append("before_after")
+        elif any(w in text for w in ["正直", "実は", "ぶっちゃけ", "告白"]):
+            structures.append("confession")
+        elif "？" in text or "?" in text:
+            structures.append("question")
+        else:
+            structures.append("statement")
+
+    # ツール頻度でソート
+    from collections import Counter
+    tool_counts = Counter(tools_mentioned)
+    top_tools = [t for t, _ in tool_counts.most_common(8)]
+
+    return {
+        "openings": openings,
+        "top_tools": top_tools if top_tools else ["ChatGPT", "Claude", "Gemini"],
+        "numbers": list(set(number_exprs)) if number_exprs else ["月5万円", "3倍", "5選", "2時間"],
+        "structures": Counter(structures),
+    }
+
+
+# --- 自動生成テンプレート群 ---
+
+def _gen_revelation(tools, numbers):
+    """「知らないとヤバい」系"""
+    tool = random.choice(tools[:4])
+    templates = [
+        f"{tool}をそのまま使ってる人、性能の半分も引き出せてないって知ってた？\n\n"
+        f"僕も最初「微妙だな」って思ってた。\n\n"
+        f"でも設定を少し変えただけで\n"
+        f"精度もスピードも劇的に変わった。\n\n"
+        f"やったのはたった3つだけ",
+
+        f"正直に言う。\n\n"
+        f"{tool}を触る前と後で\n"
+        f"作業効率が全然違う。\n\n"
+        f"以前: 1つの作業に{random.choice(['3時間', '半日', '丸1日'])}\n"
+        f"今: {random.choice(['30分', '1時間', '15分'])}で終わる\n\n"
+        f"知ってるか知らないかだけの差",
+
+        f"「{tool}なんて大したことない」\n"
+        f"って思ってた{random.choice(['3ヶ月', '半年', '1ヶ月'])}前の自分をぶん殴りたい。\n\n"
+        f"使い方を変えただけで\n"
+        f"副業の収入が{random.choice(['3倍', '5倍', '月5万円増'])}になった。\n\n"
+        f"もっと早く知りたかった",
+    ]
+    return random.choice(templates)
+
+
+def _gen_confession(tools, numbers):
+    """「自己開示×体験」系（拓巳型）"""
+    tool = random.choice(tools[:4])
+    templates = [
+        f"ぶっちゃけ、副業で稼げるようになったのは\n"
+        f"才能でもスキルでもなかった。\n\n"
+        f"{tool}の使い方を覚えて\n"
+        f"毎日{random.choice(['2時間', '1時間', '30分'])}だけやっただけ。\n\n"
+        f"正直、自分でも驚いてる。\n"
+        f"スキルゼロからでもいけるんだなって",
+
+        f"実は、{random.choice(['先月', '3ヶ月前'])}まで\n"
+        f"AI副業なんて怪しいと思ってた。\n\n"
+        f"でも{tool}を使って実際にやってみたら\n"
+        f"初月から{random.choice(['3万円', '5万円', '8万円'])}の収入になった。\n\n"
+        f"行動する前に判断してた自分が恥ずかしい",
+
+        f"正直に言うと、\n"
+        f"会社の給料だけじゃ不安だった。\n\n"
+        f"だから{tool}で副業を始めてみた。\n"
+        f"最初の{random.choice(['2週間', '1ヶ月'])}は全然ダメだった。\n\n"
+        f"でも続けたら{random.choice(['月5万', '月10万', '月8万'])}いくようになった。\n"
+        f"あの時やめなくてよかった",
+    ]
+    return random.choice(templates)
+
+
+def _gen_listicle(tools, numbers):
+    """「〇選」リスト系"""
+    tool = random.choice(tools[:4])
+    tool2 = random.choice([t for t in tools[:4] if t != tool] or tools[:1])
+    templates = [
+        f"AI副業で失敗する人の共通点{random.choice(['5つ', '3つ'])}\n\n"
+        f"① いきなり高単価案件を狙う\n"
+        f"② {tool}に丸投げして納品\n"
+        f"③ インプットばかりで手を動かさない\n\n"
+        f"逆にこれの反対をやれば\n"
+        f"{random.choice(['月5万', '月10万'])}は余裕でいける",
+
+        f"AI使って{random.choice(['月5万', '月10万'])}稼いでる人がやってること\n\n"
+        f"・{tool}で下書き→自分で仕上げ\n"
+        f"・1日{random.choice(['2時間', '1時間'])}だけ集中\n"
+        f"・完璧を求めず、まず納品\n"
+        f"・{tool2}も併用して使い分け\n\n"
+        f"才能じゃなくて「仕組み」の問題",
+
+        f"{tool}の使い方、これだけ覚えれば十分\n\n"
+        f"① 指示は「背景→条件→出力形式」の順番\n"
+        f"② 1回で完璧を求めない（3回やりとり）\n"
+        f"③ 出力は必ず自分の言葉に直す\n\n"
+        f"これだけで精度が{random.choice(['3倍', '5倍', '格段に'])}変わる",
+    ]
+    return random.choice(templates)
+
+
+def _gen_before_after(tools, numbers):
+    """Before→After型"""
+    tool = random.choice(tools[:4])
+    templates = [
+        f"{random.choice(['半年前', '3ヶ月前'])}: 残業月80時間で手取り{random.choice(['22万', '25万'])}\n"
+        f"{random.choice(['2ヶ月前', '1ヶ月前'])}: AI副業開始→初月3万円\n"
+        f"今: 副業だけで月{random.choice(['10万', '15万', '18万'])}円\n\n"
+        f"使ってるのは{tool}だけ。\n"
+        f"残業減らして収入は増えた",
+
+        f"AI副業を始めて変わったこと\n\n"
+        f"・毎月の貯金が{random.choice(['5万', '10万'])}増えた\n"
+        f"・「お金ない」が口癖じゃなくなった\n"
+        f"・将来の不安が減った\n"
+        f"・本業にも余裕ができた\n\n"
+        f"きっかけは{tool}を触ってみただけ",
+
+        f"【{tool}導入のBefore/After】\n\n"
+        f"Before:\n"
+        f"・1案件{random.choice(['3時間', '5時間'])}\n"
+        f"・月{random.choice(['3件', '5件'])}が限界\n\n"
+        f"After:\n"
+        f"・1案件{random.choice(['30分', '1時間'])}\n"
+        f"・月{random.choice(['15件', '20件'])}こなせる\n\n"
+        f"使い方を覚えただけでこの差",
+    ]
+    return random.choice(templates)
+
+
+def _gen_question(tools, numbers):
+    """疑問形×問題提起型（リプ誘発）"""
+    tool = random.choice(tools[:4])
+    templates = [
+        f"{tool}使ってる人に聞きたいんだけど、\n\n"
+        f"ぶっちゃけ副業の収入って\n"
+        f"どのくらい変わった？\n\n"
+        f"自分は{random.choice(['月3万→月10万', '月0→月5万', '月5万→月15万'])}になったけど\n"
+        f"もっと上手く使ってる人いそう",
+
+        f"AIで副業してる人、\n"
+        f"ガチで聞きたいんだけど\n\n"
+        f"何のジャンルが一番稼ぎやすかった？\n\n"
+        f"自分は{random.choice(['ライティング', 'コンテンツ販売', 'SNS運用代行'])}が\n"
+        f"一番コスパ良かったけど、みんなはどう？",
+
+        f"正直、{tool}が出てから\n"
+        f"「これ自分の仕事なくなるんじゃ…」\n"
+        f"って不安になった人いない？\n\n"
+        f"自分はむしろ逆で、\n"
+        f"AIを使う側に回ったら収入増えた。\n\n"
+        f"奪われる前に使う側になった方がよくない？",
+    ]
+    return random.choice(templates)
+
+
+GENERATOR_TYPES = [
+    ("知らないとヤバい系", _gen_revelation),
+    ("自己開示×体験（拓巳型）", _gen_confession),
+    ("リスト・箇条書き系", _gen_listicle),
+    ("Before→After系", _gen_before_after),
+    ("疑問形×リプ誘発系", _gen_question),
+]
+
+
+def auto_generate(count=5):
+    """DBデータからバズパターンを抽出して自動でポストを生成する"""
+    print("\n" + "=" * 50)
+    print("  自動ポスト生成（DBデータ駆動）")
+    print("=" * 50)
+    print("\n  データベースからバズパターンを分析中...\n")
+
+    # DBからデータ取得
+    posts = _load_top_posts(min_likes=100, limit=200)
+    if not posts:
+        print("  データが見つかりません。先にデータをインポートしてください。")
+        return []
+
+    patterns = _extract_buzz_patterns(posts)
+
+    print(f"  分析対象: {len(posts)}件のバズ投稿")
+    print(f"  トレンドツール: {', '.join(patterns['top_tools'][:5])}")
+    top_struct = patterns["structures"].most_common(3)
+    struct_str = ", ".join(f"{s}({c}件)" for s, c in top_struct)
+    print(f"  多い構造: {struct_str}")
+
+    # ポスト生成
+    generated = []
+    used_types = set()
+
+    for i in range(count):
+        # タイプをなるべくばらけさせる
+        available = [(name, gen) for name, gen in GENERATOR_TYPES if name not in used_types]
+        if not available:
+            used_types.clear()
+            available = GENERATOR_TYPES
+        type_name, gen_func = random.choice(available)
+        used_types.add(type_name)
+
+        text = gen_func(patterns["top_tools"], patterns["numbers"])
+
+        # スコア計算
+        v2 = calculate_buzz_score_v2(text)
+        algo = calculate_algorithm_score(text)
+        total = v2["total_score"] + algo["total_score"]
+
+        generated.append({
+            "type": type_name,
+            "text": text,
+            "v2": v2["total_score"],
+            "algo": algo["total_score"],
+            "total": total,
+            "chars": len(text),
+        })
+
+    # スコア順にソート
+    generated.sort(key=lambda x: x["total"], reverse=True)
+
+    # 表示
+    print(f"\n{'=' * 50}")
+    print(f"  生成結果（スコア順 / {count}件）")
+    print(f"{'=' * 50}")
+
+    for i, g in enumerate(generated, 1):
+        medal = {1: " ← BEST", 2: "", 3: ""}.get(i, "")
+        print(f"\n--- [{i}] {g['type']}  v2:{g['v2']}点 Algo:{g['algo']}点 合計:{g['total']}点 {g['chars']}字{medal} ---\n")
+        print(g["text"])
+        print()
+
+    # 合計スコアの目安
+    print("=" * 50)
+    print("  スコア目安: 合計120+で投稿OK / 140+でバズ期待大")
+    print("  投稿タイミング: 18〜21時が最適")
+    print("  リプには必ず返信（アルゴリズム150倍）")
+    print("=" * 50)
+
+    # もう一回生成するか
+    print("\n  [r] もう1回生成 / [数字] その番号を改善 / [Enter] 終了")
+    try:
+        action = input("  → ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        action = ""
+
+    if action == "r":
+        return auto_generate(count)
+    elif action.isdigit():
+        idx = int(action) - 1
+        if 0 <= idx < len(generated):
+            print(f"\n  [{idx + 1}]を改善します...\n")
+            original = generated[idx]["text"]
+            v2_old = generated[idx]["v2"]
+            algo_old = generated[idx]["algo"]
+
+            has_secret = any(p in original for p in ["正直", "実は", "ぶっちゃけ", "告白", "ここだけ"])
+            has_number = bool(re.search(r'\d+', original))
+            has_question = bool(re.search(r'[？?]', original))
+            has_cta = any(p in original for p in ["フォロー", "いいね", "RT", "保存"])
+
+            improved = _auto_improve(original, [], has_secret, has_number, has_question, has_cta)
+            v2_new = calculate_buzz_score_v2(improved)
+            algo_new = calculate_algorithm_score(improved)
+
+            print("--- 改善版 ---\n")
+            print(improved)
+            print(f"\n--- スコア ---")
+            print(f"  v2:   {v2_old}点 → {v2_new['total_score']}点 ({v2_new['total_score'] - v2_old:+d})")
+            print(f"  Algo: {algo_old}点 → {algo_new['total_score']}点 ({algo_new['total_score'] - algo_old:+d})")
+            print(f"  文字: {len(original)}字 → {len(improved)}字")
+
+    return generated
+
+
+# ========================================
 # メインメニュー
 # ========================================
 
@@ -585,6 +917,7 @@ def show_menu():
     print("  3. スコア診断（テキストを診断）")
     print("  4. 読者心理分析（なぜバズるか言語化）")
     print("  5. 2つのポストを比較")
+    print("  6. 自動ポスト生成（DB分析→即使える投稿）")
     print("  q. 終了")
     print()
 
@@ -599,7 +932,7 @@ def show_menu():
 def main():
     parser = argparse.ArgumentParser(description="CLIポストビルダー")
     parser.add_argument("command", nargs="?", default=None,
-                        help="build/improve/score/psych/compare")
+                        help="build/improve/score/psych/compare/auto")
     parser.add_argument("text", nargs="?", default=None,
                         help="score/psychの対象テキスト")
     args = parser.parse_args()
@@ -614,6 +947,8 @@ def main():
         improve_post()
     elif args.command == "compare":
         compare_posts()
+    elif args.command == "auto":
+        auto_generate()
     elif args.command is None:
         # メニューモード
         while True:
@@ -646,6 +981,8 @@ def main():
                     show_psychology(text)
             elif choice == "5":
                 compare_posts()
+            elif choice == "6":
+                auto_generate()
             elif choice in ("q", "Q", "quit", "exit"):
                 print("\n終了します\n")
                 break
