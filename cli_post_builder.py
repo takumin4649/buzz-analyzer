@@ -291,8 +291,41 @@ def _build_from_theme(pattern_key, theme):
     return random.choice(posts)
 
 
+def auto_select_pattern(theme):
+    """テーマのキーワードから最適なパターンを自動選択する"""
+    before_after_kw = ["変化", "成長", "前は", "以前は", "比較", "増えた", "減った", "上がった", "下がった", "変わった", "になった"]
+    howto_kw = ["コツ", "方法", "やり方", "手順", "ノウハウ", "スキル", "学んだ", "気づい", "選", "ポイント", "法則"]
+    empathy_kw = ["悩み", "不安", "難しい", "できない", "挫折", "辛い", "苦労", "失敗", "怖い", "心配", "どうすれば", "どうしたら"]
+
+    score = {"1": 0, "2": 0, "3": 0, "4": 0}
+    for kw in before_after_kw:
+        if kw in theme:
+            score["3"] += 2
+    for kw in howto_kw:
+        if kw in theme:
+            score["4"] += 2
+    for kw in empathy_kw:
+        if kw in theme:
+            score["2"] += 2
+
+    best = max(score, key=lambda k: score[k])
+    if score[best] == 0:
+        best = "1"  # デフォルトは拓巳型
+
+    reason = {
+        "1": "自己開示×体験の拓巳型が最適",
+        "2": "読者の悩みに共感する問題提起型が最適",
+        "3": "変化・成長を数字で見せるBefore→After型が最適",
+        "4": "ノウハウ・気づきを箇条書きにする型が最適",
+    }
+    print(f"\n  自動判定 → パターン{best}「{TEMPLATES[best]['name']}」（{reason[best]}）")
+    return best
+
+
 def build_from_args(pattern, theme):
     """引数モードのポスト生成（非対話）。最適化済みポストを出力。"""
+    if pattern is None:
+        pattern = auto_select_pattern(theme)
     if pattern not in TEMPLATES:
         print(f"エラー: --pattern は 1〜4 を指定してください（指定値: {pattern}）")
         return
@@ -1056,8 +1089,8 @@ def main():
     elif args.command == "psych" and args.text:
         show_psychology(args.text)
     elif args.command == "build":
-        if args.pattern and args.theme:
-            build_from_args(args.pattern, args.theme)
+        if args.theme:
+            build_from_args(args.pattern, args.theme)  # --pattern省略時は自動判定
         else:
             interactive_builder()
     elif args.command == "improve":
