@@ -241,48 +241,49 @@ def _build_howto(fv, opening):
 
 
 def _build_from_theme(pattern_key, theme):
-    """テーマから最適化済みポストを直接生成する（秘匿感・数字・疑問形・130-170字）"""
-    # テンプレートを使わず、バズ要素を全部入れた完成版を直接生成
-    period = random.choice(["3ヶ月", "半年", "2ヶ月"])
-    amount = random.choice(["月5万", "月8万", "月10万"])
+    """テーマから最適化済みポストを直接生成する（等身大・挑戦中目線）"""
+    # 実績を盛らない。まだ稼げてない「リアルな挑戦者」として書く
+    period = random.choice(["3週間", "2週間", "10日"])
     hours = random.choice(["2時間", "1時間", "30分"])
+    days = random.choice(["14日", "21日", "10日"])
     openings = ["正直に言う。", "実は、", "ぶっちゃけ、", "告白します。", "ここだけの話。"]
     opening = random.choice(openings)
     questions = [
-        "同じ経験ある人いる？",
-        "みんなはどう思う？",
+        "同じような人いる？",
+        "みんなはどうしてる？",
         "これって自分だけ？",
-        "やってみた人いる？",
+        "先に始めてる人、何が変わった？",
+        "正直、不安しかないんだけど合ってる？",
     ]
     question = random.choice(questions)
 
     if pattern_key == "1":
-        # 拓巳型: 自己開示 → 体験 → 気づき → 疑問
+        # 拓巳型: 等身大の自己開示 → リアルな今 → 疑問
         posts = [
-            f"{opening}\n\n{theme}、ド素人の自分には無理だと思ってた。\n\nでも{period}前に思い切って始めてみたら\n毎日{hours}の作業で{amount}になった。\n\nスキルじゃなくて「やるかやらないか」だった。\n\n{question}",
-            f"{opening}\n\n{theme}を始めた時、周りに笑われた。\n\n「お前には無理だろ」って。\n\nでも{period}コツコツやったら{amount}稼げるようになった。\n\n才能じゃない。続けただけ。\n\n{question}",
-            f"{opening}\n\n{period}前、{theme}なんて自分には縁がないと思ってた。\n\n恥ずかしいけど最初の1週間は全然ダメだった。\n\nでも毎日{hours}だけ続けたら{amount}になった。\n\nあの時やめなくてよかった。\n\n{question}",
+            f"{opening}\n\n{theme}を始めて{period}。\nまだ1円も稼げてない。\n\nでも毎日{hours}やってたら\n「これ、前より確実にわかるようになってる」\nって瞬間があった。\n\n小さいけど、これが成長なのかもしれない。\n\n{question}",
+            f"{opening}\n\n{theme}、ド素人の自分が始めて{days}目。\n\n正直まだ収益ゼロ。\nでも昨日、初めて「あ、これ自分で作れた」って思えた。\n\n稼げてないけど、確実に昨日の自分より前にいる。\n\n{question}",
+            f"{opening}\n\n{theme}に手を出した。スキルゼロから。\n\n{period}経って、まだ1円にもなってない。\nでも不思議と「やめよう」とは思わない。\n\n毎日{hours}の積み重ねが\n少しずつ自信に変わってきてる。\n\n{question}",
         ]
     elif pattern_key == "2":
-        # 問題提起×共感: 不安 → 実は → 結果 → 疑問
+        # 不安×共感: 怖いけどやってる → リアルな葛藤 → 疑問
         posts = [
-            f"「{theme}なんて怪しい」\nって思ってた{period}前の自分に言いたい。\n\n実際やってみたら\n毎日{hours}の作業で{amount}になった。\n\n不安だったけど、やらない方がリスクだった。\n\n{question}",
-            f"{opening}\n\n{theme}で失敗するのが怖くて\nずっと情報収集だけしてた。\n\nでも思い切って始めたら{period}で{amount}。\n\n調べてる時間が一番もったいなかった。\n\n{question}",
-            f"「{theme}って本当に稼げるの？」\n{period}前の自分も同じこと思ってた。\n\n結論、毎日{hours}やっただけで{amount}になった。\n\n疑ってた時間がもったいない。\n\n{question}",
+            f"「{theme}なんて自分には無理」\nって{period}前まで思ってた。\n\n正直、今もまだ1円も稼げてない。\nでも毎日{hours}触ってたら\n「無理」が「難しいけどできるかも」に変わった。\n\nこの感覚、伝わる人いる？\n\n{question}",
+            f"{opening}\n\n{theme}を始めたけど\n周りに言えてない。\n\n「失敗したら恥ずかしい」って気持ちと\n「このまま何もしない方が怖い」って気持ちが\n毎日ぶつかってる。\n\nでも{days}続いてる。それだけは事実。\n\n{question}",
+            f"ぶっちゃけ、{theme}始めて{period}。\n成果はまだゼロ。\n\n「本当にこれでいいのかな」って\n毎晩{hours}やりながら思ってる。\n\nでもやめたら「やらなかった人」で終わる。\nそれだけは嫌だから続けてる。\n\n{question}",
         ]
     elif pattern_key == "3":
-        # Before→After: 過去 → 現在 → 気づき → 疑問
+        # Before→After（小さな変化）: 過去 → 今の小さな進歩 → 疑問
         posts = [
-            f"{period}前: {theme}を全く知らない状態\n今: {amount}の収入になった\n\nやったことは毎日{hours}の作業だけ。\n\n{opening[:-1]}特別なスキルは何もなかった。\n知ってるか知らないかの差でしかない。\n\n{question}",
-            f"【{theme}のBefore/After】\n\nBefore: スキルゼロ、貯金も不安\nAfter: {period}で{amount}の副収入\n\nやったのは毎日{hours}コツコツ続けただけ。\n\n正直、もっと早く始めればよかった。\n\n{question}",
-            f"{period}前→スキルなし、副業経験ゼロ\n今→{theme}だけで{amount}\n\n変わったきっかけは「とりあえずやってみた」こと。\n\n{opening[:-1]}準備なんて要らなかった。\n\n{question}",
+            f"{period}前: {theme}って何？状態\n今: まだ稼げてないけど毎日{hours}続いてる\n\n収益はゼロ。\nでも「何がわからないか」がわかるようになった。\n\n正直これだけでも、前の自分からしたら大進歩。\n\n{question}",
+            f"【{theme}を始めて{days}目のリアル】\n\n収益: 0円\n学び: 毎日少しずつ増えてる\n不安: まだある\n後悔: ない\n\nぶっちゃけ結果は出てない。\nでも「やってる自分」は嫌いじゃない。\n\n{question}",
+            f"{period}前→{theme}を全く知らなかった\n今→まだ1円も稼げてない\n\nでもこの{days}で変わったことがある。\n\n「自分には何もできない」って思い込みが\n「やれば少しずつわかる」に変わった。\n\n{question}",
         ]
     elif pattern_key == "4":
-        # ノウハウ箇条書き: タイトル → ポイント → 疑問
+        # ノウハウ（初心者が気づいたこと）: 学び → 疑問
         posts = [
-            f"{theme}で{amount}稼ぐためにやった3つのこと\n\n① まず小さく始める（完璧を求めない）\n② 毎日{hours}だけ集中する\n③ 結果を記録して改善し続ける\n\n正直、これだけ。才能は関係ない。\n\n{question}",
-            f"{theme}で失敗する人の共通点3つ\n\n① いきなり大きく稼ごうとする\n② {hours}すら毎日続けられない\n③ 1週間で結果を求める\n\n逆にこの反対をやれば{amount}はいける。\n\n{question}",
-            f"{theme}を{period}やって気づいたこと\n\n・スキルより継続が大事\n・毎日{hours}で十分\n・完璧を目指すと止まる\n\nぶっちゃけ{amount}なら誰でもいける。\n\n{question}",
+            f"{theme}を{period}やって気づいた3つのこと\n\n① 最初から完璧にやろうとすると止まる\n② 毎日{hours}でも続ければ確実に前に進む\n③ 「わからない」は恥ずかしくない\n\nまだ1円も稼げてないけど、これは本当。\n\n{question}",
+            f"ド素人が{theme}を{days}やった正直な感想\n\n・思ったより難しい\n・でも思ったより楽しい\n・毎日{hours}は意外と続く\n・収益はまだゼロ\n\nそれでも続けてる理由は「昨日より成長してる実感」。\n\n{question}",
+            f"{theme}初心者が{period}で学んだこと\n\n・調べるより手を動かす方が早い\n・完璧を目指すと1歩も進めない\n・{hours}の積み重ねはバカにできない\n\n正直まだ何も成果はない。\nでもやめる理由もない。\n\n{question}",
         ]
     else:
         posts = [f"{opening}{theme}について語りたい。\n\n{question}"]
