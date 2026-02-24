@@ -240,6 +240,64 @@ def _build_howto(fv, opening):
     return post
 
 
+def _build_from_theme(pattern_key, theme):
+    """テーマ文字列からテンプレートフィールドを自動生成してポストを返す"""
+    tmpl = TEMPLATES[pattern_key]
+    fv = {}
+
+    if pattern_key == "1":
+        fv["disclosure"] = f"{theme}、最初は全然自信なかった"
+        fv["experience"] = f"{theme}に挑戦して3ヶ月、ほぼ独学でやってみた"
+        fv["insight"] = f"行動してみれば意外と誰でもできる"
+        fv["ending"] = ""
+    elif pattern_key == "2":
+        fv["fear"] = f"{theme}で失敗するんじゃないかと不安だった"
+        fv["result"] = f"3ヶ月で結果が出た"
+        fv["method"] = f"{theme}を毎日少しずつ続けただけ"
+        fv["ending"] = ""
+    elif pattern_key == "3":
+        fv["before_time"] = "3ヶ月前"
+        fv["before_state"] = f"{theme}を知らない状態でほぼゼロから"
+        fv["after_state"] = f"{theme}で小さいけど確実に成果が出てる"
+        fv["method"] = "コツコツ継続しただけ"
+        fv["insight"] = ""
+    elif pattern_key == "4":
+        fv["title"] = f"{theme}で結果を出す3つのコツ"
+        fv["item1"] = "まず小さく始める（完璧を求めない）"
+        fv["item2"] = "毎日少しでも続ける"
+        fv["item3"] = f"{theme}の結果を記録して振り返る"
+        fv["ending"] = ""
+
+    opening = random.choice(tmpl["openings"])
+    return tmpl["build"](fv, opening)
+
+
+def build_from_args(pattern, theme):
+    """引数モードのポスト生成（非対話）"""
+    if pattern not in TEMPLATES:
+        print(f"エラー: --pattern は 1〜4 を指定してください（指定値: {pattern}）")
+        return
+
+    tmpl = TEMPLATES[pattern]
+    print(f"\n--- パターン{pattern}: {tmpl['name']} ---")
+    print(f"--- テーマ: {theme} ---\n")
+
+    post = _build_from_theme(pattern, theme)
+
+    print("=" * 50)
+    print("  生成されたポスト")
+    print("=" * 50)
+    print()
+    print(post)
+    print()
+
+    diagnose_post(post)
+    show_psychology(post)
+
+    print("\n完成！上のテキストをコピーして投稿してください。")
+    print("投稿タイミング: 18〜21時が最適\n")
+
+
 def interactive_builder():
     """対話型ポストビルダー"""
     print("\n" + "=" * 50)
@@ -302,21 +360,22 @@ def interactive_builder():
 # 過去投稿の改善機能
 # ========================================
 
-def improve_post():
-    """過去の投稿を貼り付けて改善提案を受ける"""
+def improve_post(original=None):
+    """過去の投稿を貼り付けて改善提案を受ける。originalを渡すと非対話モード。"""
     print("\n" + "=" * 50)
     print("  過去投稿の改善")
     print("=" * 50)
-    print("\n過去の投稿を貼り付けてください。")
-    print("（複数行の場合は入力後に空行でEnter）\n")
 
-    lines = []
-    while True:
-        line = input()
-        if line == "" and lines:
-            break
-        lines.append(line)
-    original = "\n".join(lines).strip()
+    if original is None:
+        print("\n過去の投稿を貼り付けてください。")
+        print("（複数行の場合は入力後に空行でEnter）\n")
+        lines = []
+        while True:
+            line = input()
+            if line == "" and lines:
+                break
+            lines.append(line)
+        original = "\n".join(lines).strip()
 
     if not original:
         print("テキストが入力されませんでした")
@@ -504,29 +563,31 @@ def _auto_improve(original, weaknesses, has_secret, has_number, has_question, ha
 # 2つのポストを比較
 # ========================================
 
-def compare_posts():
-    """2つのポストのスコアを比較"""
+def compare_posts(post_a=None, post_b=None):
+    """2つのポストのスコアを比較。引数を渡すと非対話モード。"""
     print("\n" + "=" * 50)
     print("  ポスト比較")
     print("=" * 50)
 
-    print("\n【ポストA】を入力（空行で確定）:\n")
-    lines_a = []
-    while True:
-        line = input()
-        if line == "" and lines_a:
-            break
-        lines_a.append(line)
-    post_a = "\n".join(lines_a).strip()
+    if post_a is None:
+        print("\n【ポストA】を入力（空行で確定）:\n")
+        lines_a = []
+        while True:
+            line = input()
+            if line == "" and lines_a:
+                break
+            lines_a.append(line)
+        post_a = "\n".join(lines_a).strip()
 
-    print("\n【ポストB】を入力（空行で確定）:\n")
-    lines_b = []
-    while True:
-        line = input()
-        if line == "" and lines_b:
-            break
-        lines_b.append(line)
-    post_b = "\n".join(lines_b).strip()
+    if post_b is None:
+        print("\n【ポストB】を入力（空行で確定）:\n")
+        lines_b = []
+        while True:
+            line = input()
+            if line == "" and lines_b:
+                break
+            lines_b.append(line)
+        post_b = "\n".join(lines_b).strip()
 
     if not post_a or not post_b:
         print("両方のポストを入力してください")
@@ -930,11 +991,31 @@ def show_menu():
 # ========================================
 
 def main():
-    parser = argparse.ArgumentParser(description="CLIポストビルダー")
+    parser = argparse.ArgumentParser(
+        description="CLIポストビルダー",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+使い方:
+  python cli_post_builder.py                          → メニュー
+  python cli_post_builder.py build                    → 対話型ポスト作成
+  python cli_post_builder.py build --pattern 1 --theme "AI副業"  → 引数で即生成
+  python cli_post_builder.py improve                  → 対話型改善
+  python cli_post_builder.py improve "投稿テキスト"   → 引数で即改善
+  python cli_post_builder.py compare "投稿A" "投稿B"  → 引数で即比較
+  python cli_post_builder.py score "テキスト"         → スコア診断
+  python cli_post_builder.py psych "テキスト"         → 読者心理分析
+        """,
+    )
     parser.add_argument("command", nargs="?", default=None,
                         help="build/improve/score/psych/compare/auto")
     parser.add_argument("text", nargs="?", default=None,
-                        help="score/psychの対象テキスト")
+                        help="score/psych/improve の対象テキスト、または compare の投稿A")
+    parser.add_argument("text2", nargs="?", default=None,
+                        help="compare の投稿B")
+    parser.add_argument("--pattern", default=None,
+                        help="build: テンプレート番号 (1〜4)")
+    parser.add_argument("--theme", default=None,
+                        help="build: テーマ・トピック文字列")
     args = parser.parse_args()
 
     if args.command == "score" and args.text:
@@ -942,11 +1023,14 @@ def main():
     elif args.command == "psych" and args.text:
         show_psychology(args.text)
     elif args.command == "build":
-        interactive_builder()
+        if args.pattern and args.theme:
+            build_from_args(args.pattern, args.theme)
+        else:
+            interactive_builder()
     elif args.command == "improve":
-        improve_post()
+        improve_post(args.text)  # Noneなら対話モード
     elif args.command == "compare":
-        compare_posts()
+        compare_posts(args.text, args.text2)  # Noneなら対話モード
     elif args.command == "auto":
         auto_generate()
     elif args.command is None:
