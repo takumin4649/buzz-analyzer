@@ -370,14 +370,22 @@ def interactive_builder():
     print("  ポストビルダー（対話モード）")
     print("=" * 50)
     print("\nパターンを選んでください:")
+    print("  0. テーマから自動判定（おまかせ）")
     for key, tmpl in TEMPLATES.items():
         print(f"  {key}. {tmpl['name']}")
         print(f"     {tmpl['desc']}")
     print()
 
-    choice = input("番号を入力 (1-4): ").strip()
-    if choice not in TEMPLATES:
-        print("1-4の番号を入力してください")
+    choice = input("番号を入力 (0-4): ").strip()
+
+    if choice == "0":
+        theme = input("テーマを入力してください: ").strip()
+        if not theme:
+            print("テーマを入力してください")
+            return
+        choice = auto_select_pattern(theme)
+    elif choice not in TEMPLATES:
+        print("0-4の番号を入力してください")
         return
 
     tmpl = TEMPLATES[choice]
