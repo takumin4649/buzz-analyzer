@@ -241,39 +241,57 @@ def _build_howto(fv, opening):
 
 
 def _build_from_theme(pattern_key, theme):
-    """テーマ文字列からテンプレートフィールドを自動生成してポストを返す"""
-    tmpl = TEMPLATES[pattern_key]
-    fv = {}
+    """テーマから最適化済みポストを直接生成する（秘匿感・数字・疑問形・130-170字）"""
+    # テンプレートを使わず、バズ要素を全部入れた完成版を直接生成
+    period = random.choice(["3ヶ月", "半年", "2ヶ月"])
+    amount = random.choice(["月5万", "月8万", "月10万"])
+    hours = random.choice(["2時間", "1時間", "30分"])
+    openings = ["正直に言う。", "実は、", "ぶっちゃけ、", "告白します。", "ここだけの話。"]
+    opening = random.choice(openings)
+    questions = [
+        "同じ経験ある人いる？",
+        "みんなはどう思う？",
+        "これって自分だけ？",
+        "やってみた人いる？",
+    ]
+    question = random.choice(questions)
 
     if pattern_key == "1":
-        fv["disclosure"] = f"{theme}、最初は全然自信なかった"
-        fv["experience"] = f"{theme}に挑戦して3ヶ月、ほぼ独学でやってみた"
-        fv["insight"] = f"行動してみれば意外と誰でもできる"
-        fv["ending"] = ""
+        # 拓巳型: 自己開示 → 体験 → 気づき → 疑問
+        posts = [
+            f"{opening}\n\n{theme}、ド素人の自分には無理だと思ってた。\n\nでも{period}前に思い切って始めてみたら\n毎日{hours}の作業で{amount}になった。\n\nスキルじゃなくて「やるかやらないか」だった。\n\n{question}",
+            f"{opening}\n\n{theme}を始めた時、周りに笑われた。\n\n「お前には無理だろ」って。\n\nでも{period}コツコツやったら{amount}稼げるようになった。\n\n才能じゃない。続けただけ。\n\n{question}",
+            f"{opening}\n\n{period}前、{theme}なんて自分には縁がないと思ってた。\n\n恥ずかしいけど最初の1週間は全然ダメだった。\n\nでも毎日{hours}だけ続けたら{amount}になった。\n\nあの時やめなくてよかった。\n\n{question}",
+        ]
     elif pattern_key == "2":
-        fv["fear"] = f"{theme}で失敗するんじゃないかと不安だった"
-        fv["result"] = f"3ヶ月で結果が出た"
-        fv["method"] = f"{theme}を毎日少しずつ続けただけ"
-        fv["ending"] = ""
+        # 問題提起×共感: 不安 → 実は → 結果 → 疑問
+        posts = [
+            f"「{theme}なんて怪しい」\nって思ってた{period}前の自分に言いたい。\n\n実際やってみたら\n毎日{hours}の作業で{amount}になった。\n\n不安だったけど、やらない方がリスクだった。\n\n{question}",
+            f"{opening}\n\n{theme}で失敗するのが怖くて\nずっと情報収集だけしてた。\n\nでも思い切って始めたら{period}で{amount}。\n\n調べてる時間が一番もったいなかった。\n\n{question}",
+            f"「{theme}って本当に稼げるの？」\n{period}前の自分も同じこと思ってた。\n\n結論、毎日{hours}やっただけで{amount}になった。\n\n疑ってた時間がもったいない。\n\n{question}",
+        ]
     elif pattern_key == "3":
-        fv["before_time"] = "3ヶ月前"
-        fv["before_state"] = f"{theme}を知らない状態でほぼゼロから"
-        fv["after_state"] = f"{theme}で小さいけど確実に成果が出てる"
-        fv["method"] = "コツコツ継続しただけ"
-        fv["insight"] = ""
+        # Before→After: 過去 → 現在 → 気づき → 疑問
+        posts = [
+            f"{period}前: {theme}を全く知らない状態\n今: {amount}の収入になった\n\nやったことは毎日{hours}の作業だけ。\n\n{opening[:-1]}特別なスキルは何もなかった。\n知ってるか知らないかの差でしかない。\n\n{question}",
+            f"【{theme}のBefore/After】\n\nBefore: スキルゼロ、貯金も不安\nAfter: {period}で{amount}の副収入\n\nやったのは毎日{hours}コツコツ続けただけ。\n\n正直、もっと早く始めればよかった。\n\n{question}",
+            f"{period}前→スキルなし、副業経験ゼロ\n今→{theme}だけで{amount}\n\n変わったきっかけは「とりあえずやってみた」こと。\n\n{opening[:-1]}準備なんて要らなかった。\n\n{question}",
+        ]
     elif pattern_key == "4":
-        fv["title"] = f"{theme}で結果を出す3つのコツ"
-        fv["item1"] = "まず小さく始める（完璧を求めない）"
-        fv["item2"] = "毎日少しでも続ける"
-        fv["item3"] = f"{theme}の結果を記録して振り返る"
-        fv["ending"] = ""
+        # ノウハウ箇条書き: タイトル → ポイント → 疑問
+        posts = [
+            f"{theme}で{amount}稼ぐためにやった3つのこと\n\n① まず小さく始める（完璧を求めない）\n② 毎日{hours}だけ集中する\n③ 結果を記録して改善し続ける\n\n正直、これだけ。才能は関係ない。\n\n{question}",
+            f"{theme}で失敗する人の共通点3つ\n\n① いきなり大きく稼ごうとする\n② {hours}すら毎日続けられない\n③ 1週間で結果を求める\n\n逆にこの反対をやれば{amount}はいける。\n\n{question}",
+            f"{theme}を{period}やって気づいたこと\n\n・スキルより継続が大事\n・毎日{hours}で十分\n・完璧を目指すと止まる\n\nぶっちゃけ{amount}なら誰でもいける。\n\n{question}",
+        ]
+    else:
+        posts = [f"{opening}{theme}について語りたい。\n\n{question}"]
 
-    opening = random.choice(tmpl["openings"])
-    return tmpl["build"](fv, opening)
+    return random.choice(posts)
 
 
 def build_from_args(pattern, theme):
-    """引数モードのポスト生成（非対話）"""
+    """引数モードのポスト生成（非対話）。最適化済みポストを出力。"""
     if pattern not in TEMPLATES:
         print(f"エラー: --pattern は 1〜4 を指定してください（指定値: {pattern}）")
         return
@@ -284,8 +302,15 @@ def build_from_args(pattern, theme):
 
     post = _build_from_theme(pattern, theme)
 
+    # スコアを確認し、足りなければ自動改善
+    has_secret = any(p in post for p in ["正直", "実は", "ド素人", "告白", "恥ずかしい", "ぶっちゃけ", "ここだけ"])
+    has_number = bool(re.search(r'\d+', post))
+    has_question = bool(re.search(r'[？?]', post))
+    has_cta = any(p in post for p in ["フォロー", "いいね", "RT", "保存"])
+    post = _auto_improve(post, [], has_secret, has_number, has_question, has_cta)
+
     print("=" * 50)
-    print("  生成されたポスト")
+    print("  生成されたポスト（最適化済み）")
     print("=" * 50)
     print()
     print(post)
@@ -294,8 +319,15 @@ def build_from_args(pattern, theme):
     diagnose_post(post)
     show_psychology(post)
 
-    print("\n完成！上のテキストをコピーして投稿してください。")
-    print("投稿タイミング: 18〜21時が最適\n")
+    # コピー用
+    print("\n" + "=" * 50)
+    print("  コピー用（以下をそのまま投稿）")
+    print("=" * 50)
+    print()
+    print(post)
+    print()
+    print("投稿タイミング: 18〜21時が最適")
+    print("=" * 50)
 
 
 def interactive_builder():
